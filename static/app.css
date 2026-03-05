@@ -1,0 +1,262 @@
+/* Paleta roja/blanco/verde con alto contraste y buena legibilidad */
+:root{
+  --red-600:#c8102e;   /* primario rojo */
+  --red-700:#a20d26;
+  --green-600:#198754; /* éxito (bootstrap) */
+  --green-700:#136b41;
+  --bg-page:#ffffff;   /* fondo blanco */
+  --card:#ffffff;      /* tarjetas */
+  --border:#e5e7eb;    /* borde suave */
+  --text:#0f172a;      /* gris muy oscuro (mejor lectura) */
+  --text-muted:#475569;/* contraste intermedio */
+  --shadow: 0 10px 28px rgba(15, 23, 42, .08);
+}
+
+.bg-page{ background:var(--bg-page) !important; }
+.text-body{ color:var(--text) !important; }
+.text-contrast-70{ color:var(--text-muted) !important; }
+
+.mi-logo{ height:36px; }
+
+/* Navbar */
+.portal-navbar{
+  background:var(--red-600);
+  border-bottom:3px solid var(--red-700);
+}
+.portal-navbar .navbar-brand .brand-text{
+  color:#fff;
+  font-weight:700;
+  letter-spacing:.3px;
+}
+.portal-navbar .btn-outline-primary{
+  --bs-btn-color:#fff;
+  --bs-btn-border-color:#fff;
+  --bs-btn-hover-bg:#fff;
+  --bs-btn-hover-color:var(--red-600);
+  --bs-btn-hover-border-color:#fff;
+}
+
+/* Card general */
+.portal-card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:14px;
+  color:var(--text);
+  box-shadow: var(--shadow);
+}
+
+.text-primary{ color:var(--red-600)!important; }
+
+/* Botones rojos accesibles */
+.btn-primary{
+  --bs-btn-bg:var(--red-600);
+  --bs-btn-border-color:var(--red-600);
+  --bs-btn-hover-bg:var(--red-700);
+  --bs-btn-hover-border-color:var(--red-700);
+  --bs-btn-active-bg:var(--red-700);
+  --bs-btn-active-border-color:var(--red-700);
+}
+.btn-outline-primary{
+  --bs-btn-color:var(--red-600);
+  --bs-btn-border-color:var(--red-600);
+  --bs-btn-hover-bg:var(--red-600);
+  --bs-btn-hover-border-color:var(--red-600);
+  --bs-btn-hover-color:#fff;
+}
+
+/* Inputs/select: coherencia + focus rojo */
+.form-control,
+.form-select{
+  border-color: var(--border);
+  border-radius: 12px;
+}
+.form-control:focus,
+.form-select:focus{
+  border-color: rgba(200, 16, 46, .55);
+  box-shadow: 0 0 0 .25rem rgba(200, 16, 46, .18);
+}
+
+/* Alerts más redondeadas */
+.alert{
+  border-radius: 14px;
+  border-color: var(--border);
+}
+
+/* List-group “pro” */
+.list-group-item{
+  border-color: var(--border);
+}
+.list-group-item-action:hover{
+  background: #fff5f6;
+}
+.list-group-item-action:active{
+  background: #ffe6ea;
+}
+
+/* Tablas con encabezado en tono suave rojizo */
+.portal-table thead{
+  background:#fff5f6;
+}
+.portal-table thead th{
+  color:var(--red-700);
+  border-bottom:2px solid var(--red-600);
+}
+.portal-table td, .portal-table th{
+  vertical-align:middle;
+}
+.portal-table tbody tr:hover{
+  background: rgba(200, 16, 46, .04);
+}
+
+/* Dropdowns (navbar y acciones) */
+.dropdown-menu{
+  border-radius: 14px;
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+  padding: 8px;
+  min-width: 220px;
+}
+.dropdown-item{
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.dropdown-item:hover{
+  background: #fff5f6;
+}
+.dropdown-item:active{
+  background: #ffe6ea;
+}
+.dropdown-menu form{ margin: 0; }
+.dropdown-menu .dropdown-item{
+  width: 100%;
+  text-align: left;
+}
+.dropdown-item.disabled,
+.dropdown-item:disabled{
+  opacity: .45;
+  pointer-events: none;
+}
+
+/* Consola de logs (fondo oscuro, texto verde) */
+.console{
+  background:#0b1220;
+  color:#9ef196;
+  border:1px solid #213047;
+  border-radius:12px;
+  padding:12px;
+  height:420px;
+  overflow:auto;
+  font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono",monospace;
+  white-space:pre-wrap;
+}
+
+/* Footer */
+.portal-footer{
+  background:#fff;
+  border-top:1px solid var(--border);
+}
+
+/* ===========================
+   AUTH (LOGIN / HOME) - estilo pro
+   =========================== */
+.auth-wrap{
+  min-height: calc(100vh - 120px); /* deja espacio para navbar/footer */
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding: 28px 16px;
+}
+
+.auth-card{
+  width: 100%;
+  max-width: 520px; /* un pelín más ancho para Home */
+  border-radius: 16px;
+  padding: 22px 22px 20px;
+}
+
+.auth-header{
+  display:flex;
+  align-items:center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.auth-logo{
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color: #fff;
+  background: var(--red-600);
+  box-shadow: 0 6px 18px rgba(200, 16, 46, .22);
+}
+
+.auth-title{
+  font-weight: 800;
+  letter-spacing: .2px;
+  color: var(--text);
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+.auth-subtitle{
+  font-size: .95rem;
+  margin-top: 2px;
+}
+
+.auth-input{
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.auth-input:focus{
+  border-color: rgba(200, 16, 46, .55);
+  box-shadow: 0 0 0 .25rem rgba(200, 16, 46, .18);
+}
+
+.auth-btn{
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 700;
+}
+
+/* Badge (rojo) */
+.badge-portal{
+  background: var(--red-600) !important;
+  color: #fff !important;
+  border: 1px solid var(--red-700) !important;
+  font-weight: 700;
+  letter-spacing: .2px;
+  padding: .45rem .7rem;
+}
+
+
+
+
+/* ====== Focus/Active en verde (home + botones en general) ====== */
+
+/* Ring (focus) verde */
+.btn:focus,
+.btn:focus-visible{
+  box-shadow: 0 0 0 .25rem rgba(25, 135, 84, .22) !important; /* verde */
+  outline: none !important;
+}
+
+/* Active para outline-primary: que no “salte” a azul */
+.btn-outline-primary:active,
+.btn-outline-primary.active{
+  background: var(--green-600) !important;
+  border-color: var(--green-600) !important;
+  color: #fff !important;
+}
+
+/* Si el navegador pinta azul en clicks rápidos, esto lo mata */
+.btn-outline-primary:focus:active{
+  box-shadow: 0 0 0 .25rem rgba(25, 135, 84, .28) !important;
+}
+
+
+
+

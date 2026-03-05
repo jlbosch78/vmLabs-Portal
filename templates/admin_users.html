@@ -1,0 +1,116 @@
+{% extends "layout.html" %}
+{% block body %}
+
+<h2 class="fw-bold mb-2 text-primary">Admin Usuarios</h2>
+<p class="text-contrast-70 mb-4">
+  Crea usuarios y asigna roles. El rol <strong>admin</strong> ve todo; <strong>profesor</strong> solo Admin Labs (y solo los labs asignados).
+</p>
+
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="p-3 border rounded-3">
+      <div class="fw-bold mb-2">Crear usuario</div>
+      <form method="post" action="{{ url_for('users_create') }}" class="row g-2">
+        <div class="col-md-3">
+          <input class="form-control" name="username" placeholder="usuario" required>
+        </div>
+        <div class="col-md-3">
+          <select class="form-select" name="role" required>
+            <option value="profesor">profesor</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div class="col-md-3">
+          <input class="form-control" type="password" name="password" placeholder="contraseña" required>
+        </div>
+        <div class="col-md-3">
+          <input class="form-control" type="password" name="password2" placeholder="repetir contraseña" required>
+        </div>
+        <div class="col-12">
+          <button class="btn btn-primary w-100" type="submit">Crear</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table align-middle portal-table">
+    <thead>
+      <tr>
+        <th>Usuario</th>
+        <th>Rol</th>
+        <th>Labs</th>
+        <th>Creado</th>
+        <th style="width:520px">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for u in users %}
+        {% set labs_assigned = (user_labs.get(u.username, []) if user_labs is defined else []) %}
+        <tr>
+          <td class="fw-medium">{{ u.username }}</td>
+          <td><span class="badge text-bg-light border">{{ u.role }}</span></td>
+
+          <td>
+            {% if u.role == 'profesor' %}
+              <span class="badge badge-portal">{{ labs_assigned|length }}</span>
+              <span class="small text-contrast-70">
+                {% if labs_assigned|length == 0 %}
+                  (sin asignar)
+                {% else %}
+                  {{ (labs_assigned[:2] | join(', ')) }}{% if labs_assigned|length > 2 %}…{% endif %}
+                {% endif %}
+              </span>
+            {% else %}
+              <span class="text-contrast-70 small">—</span>
+            {% endif %}
+          </td>
+
+          <td class="text-contrast-70 small">{{ u.created_at }}</td>
+
+          <td class="d-flex flex-wrap gap-2">
+
+            <form method="post" action="{{ url_for('users_set_role', username=u.username) }}" class="d-flex gap-2">
+              <select class="form-select form-select-sm" name="role" {% if u.username == session.get('username') %}disabled{% endif %}>
+                <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+                <option value="profesor" {% if u.role == 'profesor' %}selected{% endif %}>profesor</option>
+              </select>
+              <button class="btn btn-outline-primary btn-sm" type="submit"
+                      {% if u.username == session.get('username') %}disabled{% endif %}>
+                Guardar rol
+              </button>
+            </form>
+
+            {% if u.role == 'profesor' %}
+              <a class="btn btn-outline-primary btn-sm"
+                 href="{{ url_for('users_set_labs', username=u.username) }}">
+                Asignar Labs
+              </a>
+            {% endif %}
+
+            <a class="btn btn-outline-secondary btn-sm"
+               href="{{ url_for('users_set_password', username=u.username) }}">
+              Cambiar contraseña
+            </a>
+
+            <form method="post" action="{{ url_for('users_delete', username=u.username) }}"
+                  onsubmit="return confirm('¿Eliminar el usuario {{ u.username }}?');">
+              <button class="btn btn-outline-danger btn-sm" type="submit"
+                      {% if u.username == session.get('username') %}disabled{% endif %}>
+                Eliminar
+              </button>
+            </form>
+
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="mt-3">
+  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
+</div>
+
+{% endblock %}

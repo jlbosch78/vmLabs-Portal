@@ -1,0 +1,95 @@
+{% extends "layout.html" %}
+{% block body %}
+<h2 class="fw-bold mb-2 text-primary">Paso 2 · Distribuir {{ total }} VM(s) por host</h2>
+<p class="text-contrast-70 mb-4">Ajusta las cantidades por host. La suma debe coincidir con el total.</p>
+
+<form method="post" action="{{ url_for('start_job_with_distribution') }}">
+  <input type="hidden" name="template" value="{{ template }}">
+  <input type="hidden" name="folder" value="{{ folder }}">
+  <input type="hidden" name="datastore" value="{{ datastore }}">
+  <input type="hidden" name="network" value="{{ network }}">
+  <input type="hidden" name="csv_path" value="{{ csv_path }}">
+
+  <div class="table-responsive mb-2">
+    <table class="table align-middle portal-table">
+      <thead>
+        <tr><th>Host</th><th style="width:200px">VMs asignadas</th></tr>
+      </thead>
+      <tbody>
+        {% for h, val in initial.items() %}
+        <tr>
+          <td class="fw-medium">{{ h }}</td>
+          <td>
+            <input type="number" class="form-control host-count" min="0" step="1"
+                   name="host_{{ loop.index0 }}" value="{{ val }}" data-host="{{ h }}">
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <input type="hidden" name="host_names" value="{{ '|'.join(hosts) }}">
+  <input type="hidden" name="make_teacher" value="{{ 'on' if make_teacher else '' }}">
+  <input type="hidden" name="teacher_user" value="{{ teacher_user }}">
+
+  <p class="mb-3">Total asignado:
+    <span id="sum" class="badge rounded-pill text-bg-success">0</span>
+    / <span class="fw-bold">{{ total }}</span>
+  </p>
+  {% if make_teacher and teacher_user %}
+    <div class="alert alert-info">
+      Se creará una VM para el profesor: <strong>{{ folder }}-{{ teacher_user }}</strong> en la carpeta <strong>Profesores</strong>.
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Host para la VM del profesor</label>
+      <select name="teacher_host" class="form-select">
+        {% for h in hosts %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <hr class="my-3">
+  {% endif %}
+
+  <div class="form-check mb-2">
+    <input class="form-check-input" type="checkbox" name="power_on" id="power_on">
+    <label class="form-check-label" for="power_on">
+      Encender las VMs luego de crearlas
+    </label>
+  </div>
+
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="make_snapshot" id="make_snapshot">
+    <label class="form-check-label" for="make_snapshot">
+      Crear instantánea inicial tras el clonado (baseline)
+    </label>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button id="launch" class="btn btn-primary" type="submit" disabled>Crear laboratorio</button>
+    <!-- AQUÍ EL CAMBIO: antes era url_for('index') -->
+    <a class="btn btn-outline-primary" href="{{ url_for('create_lab') }}">← Volver</a>
+  </div>
+
+</form>
+
+<script>
+  const total = {{ total }};
+  function recalc() {
+    let sum = 0;
+    document.querySelectorAll('.host-count').forEach(inp => {
+      const v = parseInt(inp.value || '0', 10);
+      if (!isNaN(v)) sum += v;
+    });
+    const badge = document.getElementById('sum');
+    badge.textContent = sum.toString();
+    const ok = (sum === total);
+    badge.className = ok ? 'badge rounded-pill text-bg-success' : 'badge rounded-pill text-bg-danger';
+    document.getElementById('launch').disabled = !ok;
+  }
+  document.querySelectorAll('.host-count').forEach(inp => {
+    inp.addEventListener('input', recalc);
+    inp.addEventListener('change', recalc);
+  });
+  recalc();
+</script>
+{% endblock %}

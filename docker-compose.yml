@@ -1,0 +1,38 @@
+services:
+  web:
+    build: .
+    env_file: .env
+    ports:
+      - "5000:5000"
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ./data:/data
+      - ./tmp:/tmp/vclab_jobs
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    command: sh -c "gunicorn -b 0.0.0.0:${FLASK_PORT:-5000} --workers 1 --threads 12 --timeout 300 --graceful-timeout 30 --keep-alive 5 app:app"
+
+  scheduler:
+    build: .
+    env_file: .env
+    environment:
+      - TZ=${TZ}
+    volumes:
+      - ./data:/data
+      - ./tmp:/tmp/vclab_jobs
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    command: sh -c "python scheduler.py"

@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+{% block body %}
+<h2 class="fw-bold mb-2 text-primary">Job {{ job_id }}</h2>
+<p class="text-contrast-70 mb-3">Registros en tiempo real.</p>
+
+{% if missing %}
+  <div class="alert alert-danger">Job no encontrado.</div>
+{% else %}
+  <div id="log" class="console"></div>
+  <script>
+    var evtSource = new EventSource("{{ url_for('stream', job_id=job_id) }}");
+    evtSource.onmessage = function(e) {
+      var log = document.getElementById("log");
+      log.textContent += e.data + "\n";
+      log.scrollTop = log.scrollHeight;
+    };
+    evtSource.onerror = function(e) {
+      console.error("SSE error", e);
+      evtSource.close();
+    };
+  </script>
+{% endif %}
+{% endblock %}

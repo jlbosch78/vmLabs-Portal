@@ -1,0 +1,439 @@
+{% extends "layout.html" %}
+{% block body %}
+<h2 class="fw-bold mb-2 text-primary">Laboratorio: {{ lab_name }}</h2>
+<p class="text-contrast-70 mb-3">Estado, VMRC y acciones (actualización manual).</p>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <form method="post" action="{{ url_for('lab_power_on') }}"
+        onsubmit="return confirm('¿Encender TODAS las VMs del lab {{ lab_name }}?');">
+    <input type="hidden" name="lab_name" value="{{ lab_name }}">
+    <button class="btn btn-success">Encender todo</button>
+  </form>
+
+  <form method="post" action="{{ url_for('lab_power_off') }}"
+        onsubmit="return confirm('¿Apagar TODAS las VMs del lab {{ lab_name }} (apagado amable)?');">
+    <input type="hidden" name="lab_name" value="{{ lab_name }}">
+    <button class="btn btn-danger">Apagar todo (amable)</button>
+  </form>
+
+  <button id="refreshStatesBtn" class="btn btn-outline-secondary" type="button">
+    Actualizar estados
+  </button>
+
+  <div class="mx-3" style="width:1px;height:38px;background:rgba(0,0,0,.15)"></div>
+
+{% if session.get('role') == 'admin' %}
+  <form id="deleteLabForm" method="post" action="{{ url_for('lab_delete') }}">
+    <input type="hidden" name="lab_name" value="{{ lab_name }}">
+    <button id="deleteLabBtn" class="btn btn-outline-danger" type="submit">
+      Eliminar Lab
+    </button>
+  </form>
+{% endif %}
+
+  <a class="btn btn-outline-primary ms-auto" href="{{ url_for('labs') }}">← Volver</a>
+</div>
+
+<style>
+  .pwr-dot{
+    display:inline-block;
+    width:16px;height:16px;
+    border-radius:50%;
+    margin-right:8px;
+    vertical-align:middle;
+    box-shadow: 0 0 0 2px rgba(0,0,0,.08);
+  }
+  .pwr-on{ background:#22c55e; }
+  .pwr-off{ background:#ef4444; }
+  .pwr-unk{ background:#f59e0b; }
+
+  .mini-spin {
+    display:inline-block;
+    width:14px;height:14px;
+    border-radius:50%;
+    border:2px solid rgba(0,0,0,.15);
+    border-top-color: rgba(0,0,0,.55);
+    animation: spin 0.8s linear infinite;
+    vertical-align: -2px;
+    margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .dropdown-menu{ min-width: 220px; }
+  .dropdown-menu form{ margin:0; }
+  .dropdown-item.disabled, .dropdown-item:disabled { opacity: .45; pointer-events: none; }
+  .vm-actions-wrap{ display:flex; flex-wrap:wrap; gap:.5rem; align-items:center; }
+
+  .snap-badge{
+    display:inline-flex;
+    align-items:center;
+    gap:.35rem;
+    padding:.15rem .5rem;
+    border-radius:999px;
+    font-size:.82rem;
+    border:1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.06);
+    color: rgba(255,255,255,.8);
+  }
+</style>
+
+<div class="table-responsive">
+  <table class="table align-middle portal-table">
+    <thead>
+      <tr>
+        <th>Estado</th>
+        <th>VM</th>
+        <th style="width:720px">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for vm in vms %}
+      <tr
+        data-moid="{{ vm.moid }}"
+        data-vmname="{{ vm.name|e }}"
+        data-has-snapshot="{{ '1' if vm.has_snapshot else '0' }}"
+        data-snapshot-count="{{ vm.snapshot_count if vm.snapshot_count is defined else (1 if vm.has_snapshot else 0) }}"
+      >
+        <td style="width:180px">
+          <span class="pwr-dot {{ 'pwr-on' if vm.power=='poweredOn' else ('pwr-off' if vm.power=='poweredOff' else 'pwr-unk') }}"></span>
+          <span class="fw-medium pwr-text">
+            {% if vm.power == "poweredOn" %}ON{% elif vm.power == "poweredOff" %}OFF{% elif vm.power == "suspended" %}SUSP{% else %}?{% endif %}
+          </span>
+
+          <span class="ms-2 snap-badge snap-badge-el" title="Snapshots">
+            🧷 <span class="snap-count">{{ vm.snapshot_count if vm.snapshot_count is defined else (1 if vm.has_snapshot else 0) }}</span>
+          </span>
+        </td>
+
+        <td class="fw-medium">{{ vm.name }}</td>
+
+        <td class="actions" data-power="{{ vm.power|e }}">
+          <div class="vm-actions-wrap">
+
+            <!-- Energía -->
+            <div class="btn-group">
+              <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
+                      data-bs-toggle="dropdown" aria-expanded="false">
+                Energía
+              </button>
+              <ul class="dropdown-menu">
+                <li>
+                  {% if vm.power == "poweredOn" %}
+                    <button class="dropdown-item disabled js-action-on" type="button">Encender</button>
+                  {% else %}
+                    <form method="post" action="{{ url_for('vm_power_on') }}">
+                      <input type="hidden" name="moid" value="{{ vm.moid }}">
+                      <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                      <button class="dropdown-item js-action-on" type="submit">
+                        {% if vm.power == "suspended" %}Reanudar{% else %}Encender{% endif %}
+                      </button>
+                    </form>
+                  {% endif %}
+                </li>
+
+                <li>
+                  {% if vm.power == "poweredOff" %}
+                    <button class="dropdown-item disabled js-action-off" type="button">Apagar</button>
+                  {% else %}
+                    <form method="post" action="{{ url_for('vm_power_off') }}"
+                          onsubmit="return confirm('¿Apagar la VM {{ vm.name }} (apagado amable)?');">
+                      <input type="hidden" name="moid" value="{{ vm.moid }}">
+                      <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                      <button class="dropdown-item js-action-off" type="submit">Apagar</button>
+                    </form>
+                  {% endif %}
+                </li>
+
+                <li>
+                  {% if vm.power != "poweredOn" %}
+                    <button class="dropdown-item disabled js-action-reboot" type="button">Reiniciar</button>
+                  {% else %}
+                    <form method="post" action="{{ url_for('vm_power_reboot') }}"
+                          onsubmit="return confirm('¿Reiniciar la VM {{ vm.name }} (amable)?');">
+                      <input type="hidden" name="moid" value="{{ vm.moid }}">
+                      <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                      <button class="dropdown-item js-action-reboot" type="submit">Reiniciar</button>
+                    </form>
+                  {% endif %}
+                </li>
+              </ul>
+            </div>
+
+            <!-- Snapshot -->
+            <div class="btn-group">
+              <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                      data-bs-toggle="dropdown" aria-expanded="false">
+                Snapshot
+              </button>
+              <ul class="dropdown-menu">
+                <li>
+                  <form method="post" action="{{ url_for('vm_snapshot_create') }}"
+                        onsubmit="return confirm('¿Crear snapshot de la VM {{ vm.name }}?');">
+                    <input type="hidden" name="moid" value="{{ vm.moid }}">
+                    <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                    <button class="dropdown-item js-snap-create" type="submit">Crear snapshot</button>
+                  </form>
+                </li>
+
+                <li>
+                  {% if vm.snapshot_count and vm.snapshot_count > 0 %}
+                    <form method="post" action="{{ url_for('vm_snapshot_delete_last') }}"
+                          onsubmit="return confirmDeleteSnapshot('{{ vm.name|e }}', this);">
+                      <input type="hidden" name="moid" value="{{ vm.moid }}">
+                      <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                      <input type="hidden" name="confirm" value="">
+                      <button class="dropdown-item js-snap-delete" type="submit">Eliminar snapshot</button>
+                    </form>
+                  {% else %}
+                    <button class="dropdown-item disabled js-snap-delete" type="button">
+                      Eliminar snapshot <small>(sin snapshots)</small>
+                    </button>
+                  {% endif %}
+                </li>
+              </ul>
+            </div>
+
+            <!-- Máquina Virtual -->
+            <div class="btn-group">
+              <button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button"
+                      data-bs-toggle="dropdown" aria-expanded="false">
+                Máquina Virtual
+              </button>
+              <ul class="dropdown-menu">
+                <li>
+                  <a class="dropdown-item" href="vmrc://{{ vcenter_host }}/?moid={{ vm.moid }}">
+                    Ver consola (VMRC)
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" href="https://{{ vcenter_host }}/ui" target="_blank" rel="noopener">
+                    Abrir vCenter
+                  </a>
+                </li>
+
+                <li><hr class="dropdown-divider"></li>
+
+                <li>
+                  {% if vm.has_snapshot %}
+                    <form method="post" action="{{ url_for('vm_recreate') }}"
+                          onsubmit="return confirmRecreate('{{ vm.name|e }}', this);">
+                      <input type="hidden" name="moid" value="{{ vm.moid }}">
+                      <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                      <input type="hidden" name="confirm" value="">
+                      <button class="dropdown-item js-recreate" type="submit">Recrear MV</button>
+                    </form>
+                  {% else %}
+                    <button class="dropdown-item disabled js-recreate" type="button">
+                      Recrear MV <small>(sin snapshots)</small>
+                    </button>
+                  {% endif %}
+                </li>
+
+                <li>
+                  <form method="post" action="{{ url_for('vm_delete') }}"
+                        onsubmit="return confirmDeleteVM('{{ vm.name|e }}', this);">
+                    <input type="hidden" name="moid" value="{{ vm.moid }}">
+                    <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                    <input type="hidden" name="confirm" value="">
+                    <button class="dropdown-item text-danger" type="submit">
+                      Eliminar MV
+                    </button>
+                  </form>
+                </li>
+              </ul>
+            </div>
+
+          </div>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="3" class="text-muted">No hay VMs en esta carpeta.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  function confirmRecreate(vmName, formEl) {
+    const msg =
+`⚠️ RECREAR VM: acción destructiva (revierte al snapshot baseline).
+Se perderán cambios desde el baseline.
+
+Escribe SI para confirmar:`;
+    const typed = prompt(msg, "");
+    if (typed === null) return false;
+    if (typed.trim().toUpperCase() !== "SI") {
+      alert("Confirmación incorrecta. No se recreó la VM.");
+      return false;
+    }
+    const hidden = formEl.querySelector('input[name="confirm"]');
+    if (hidden) hidden.value = "SI";
+    return true;
+  }
+
+  function confirmDeleteSnapshot(vmName, formEl) {
+    const msg =
+`⚠️ ELIMINAR SNAPSHOT (último): acción destructiva.
+Si hay varios snapshots, se eliminará SOLO el más reciente (último por fecha).
+
+Escribe SI para confirmar:`;
+    const typed = prompt(msg, "");
+    if (typed === null) return false;
+    if (typed.trim().toUpperCase() !== "SI") {
+      alert("Confirmación incorrecta. No se eliminó el snapshot.");
+      return false;
+    }
+    const hidden = formEl.querySelector('input[name="confirm"]');
+    if (hidden) hidden.value = "SI";
+    return true;
+  }
+
+  function confirmDeleteVM(vmName, formEl) {
+    const msg =
+`⚠️ ELIMINAR VM: acción irreversible.
+Se borrará la máquina '${vmName}' y todos sus discos.
+
+Escribe SI para confirmar:`;
+    const typed = prompt(msg, "");
+    if (typed === null) return false;
+    if (typed.trim().toUpperCase() !== "SI") {
+      alert("Confirmación incorrecta. No se eliminó la VM.");
+      return false;
+    }
+    const hidden = formEl.querySelector('input[name="confirm"]');
+    if (hidden) hidden.value = "SI";
+    return true;
+  }
+
+  (function() {
+    const form = document.getElementById("deleteLabForm");
+    if (!form) return;
+    const expected = {{ lab_name|tojson }};
+
+    form.addEventListener("submit", function(e) {
+      e.preventDefault();
+
+      const msg =
+`⚠️ ELIMINAR LAB: acción irreversible.
+Se eliminarán snapshots, VMs y discos.
+
+Para confirmar, escribe EXACTAMENTE:
+${expected}`;
+
+      const typed = prompt(msg, "");
+      if (typed === null) return;
+      if (typed.trim() !== expected) {
+        alert("Confirmación incorrecta. No se eliminó el lab.");
+        return;
+      }
+
+      const ok = confirm("Último aviso: ¿Seguro que quieres ELIMINARLO?");
+      if (!ok) return;
+
+      form.submit();
+    });
+  })();
+
+  const LAB_NAME = {{ lab_name|tojson }};
+  const VCENTER_HOST = {{ vcenter_host|tojson }};
+
+  function dotClass(power) {
+    if (power === "poweredOn") return "pwr-dot pwr-on";
+    if (power === "poweredOff") return "pwr-dot pwr-off";
+    return "pwr-dot pwr-unk";
+  }
+  function label(power) {
+    if (power === "poweredOn") return "ON";
+    if (power === "poweredOff") return "OFF";
+    if (power === "suspended") return "SUSP";
+    return "?";
+  }
+
+  function setDisabled(el, disabled) {
+    if (!el) return;
+    if (disabled) {
+      el.classList.add("disabled");
+      el.setAttribute("aria-disabled", "true");
+      el.setAttribute("tabindex", "-1");
+    } else {
+      el.classList.remove("disabled");
+      el.removeAttribute("aria-disabled");
+      el.removeAttribute("tabindex");
+    }
+  }
+
+  function applyRowState(row, data) {
+    const power = data.power;
+
+    // dataset
+    row.dataset.hasSnapshot = data.has_snapshot ? "1" : "0";
+    row.dataset.snapshotCount = String(parseInt(data.snapshot_count || "0", 10));
+
+    // dot + label
+    const dot = row.querySelector(".pwr-dot");
+    const txt = row.querySelector(".pwr-text");
+    if (dot) dot.className = dotClass(power);
+    if (txt) txt.textContent = label(power);
+
+    // snapshot badge
+    const snapCountEl = row.querySelector(".snap-count");
+    if (snapCountEl) snapCountEl.textContent = String(parseInt(data.snapshot_count || "0", 10));
+
+    // enable/disable actions according to new state
+    const canOn = (power !== "poweredOn");
+    const canOff = (power !== "poweredOff");
+    const canReboot = (power === "poweredOn");
+    const snapCount = parseInt(data.snapshot_count || "0", 10);
+    const canDeleteSnap = snapCount > 0;
+    const canRecreate = snapCount > 0; // tu backend usa baseline rootSnapshotList[0]; si hay snapshots, se habilita
+
+    // Energy
+    row.querySelectorAll(".js-action-on").forEach(el => setDisabled(el, !canOn));
+    row.querySelectorAll(".js-action-off").forEach(el => setDisabled(el, !canOff));
+    row.querySelectorAll(".js-action-reboot").forEach(el => setDisabled(el, !canReboot));
+
+    // Snapshot
+    row.querySelectorAll(".js-snap-delete").forEach(el => setDisabled(el, !canDeleteSnap));
+
+    // Recreate
+    row.querySelectorAll(".js-recreate").forEach(el => setDisabled(el, !canRecreate));
+  }
+
+  async function fetchPower(moid) {
+    const res = await fetch(`/api/vm/power?moid=${encodeURIComponent(moid)}`, { cache: "no-store" });
+    const data = await res.json();
+    return data;
+  }
+
+  async function refreshAllStates() {
+    const btn = document.getElementById("refreshStatesBtn");
+    const prev = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="mini-spin"></span>Actualizando...';
+
+    const rows = Array.from(document.querySelectorAll("tr[data-moid]"));
+    const concurrency = 8; // límite para no saturar el servidor
+    let idx = 0;
+
+    async function worker() {
+      while (idx < rows.length) {
+        const myIdx = idx++;
+        const row = rows[myIdx];
+        const moid = row.getAttribute("data-moid");
+        try {
+          const data = await fetchPower(moid);
+          if (data && data.ok) applyRowState(row, data);
+        } catch (e) { /* silencioso */ }
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(concurrency, rows.length) }, () => worker());
+    await Promise.all(workers);
+
+    btn.innerHTML = prev;
+    btn.disabled = false;
+  }
+
+  document.getElementById("refreshStatesBtn").addEventListener("click", refreshAllStates);
+</script>
+{% endblock %}
