@@ -9,6 +9,45 @@ Portal web (Flask) para administrar laboratorios (carpetas) y máquinas virtuale
 - **Scheduler** semanal para encendido/apagado automático por vCenter.
 - Usuarios/roles locales (admin/profesor) almacenados en SQLite.
 
+> Nota: este proyecto **no asigna permisos en vCenter** durante el clonado (la asignación de permisos fue eliminada).
+
+---
+
+## Capturas
+
+Las capturas están en `docs/images/` (en este repo). Si renombraste los ficheros, actualiza las rutas.
+
+### Login
+![Login](docs/images/1.png)
+
+### Panel principal (selector de vCenter)
+![Panel principal](docs/images/2.png)
+
+### Crear laboratorio (Paso 1)
+![Crear laboratorio - Paso 1](docs/images/4.png)
+
+### Distribución por host (Paso 2)
+![Distribución por host - Paso 2](docs/images/5.png)
+
+<details>
+<summary>Más capturas</summary>
+
+### Programar Inicio/Apagado
+![Programar Inicio/Apagado](docs/images/7.png)
+
+### Panel principal con vCenter seleccionado
+![Panel principal - vCenter seleccionado](docs/images/3.png)
+
+### Administración de usuarios
+![Admin Usuarios](docs/images/9.png)
+
+### Reglas y ejecuciones del scheduler
+![Reglas del scheduler](docs/images/8.png)
+
+### Detalle de laboratorio (acciones por VM)
+![Detalle de laboratorio](docs/images/6.png)
+
+</details>
 
 ---
 
@@ -179,7 +218,15 @@ location /stream/ {
 }
 ```
 
+---
 
+## Notas de seguridad
+
+- No comitees `.env`.
+- No comitees `./data/users.db`.
+- Usa credenciales de vCenter con privilegios mínimos.
+- Usa un `FLASK_SECRET` fuerte.
+- Para reportar vulnerabilidades, ver `SECURITY.md`.
 
 ---
 
@@ -201,5 +248,3 @@ En algunos Debian antiguos se usa `docker-compose` en vez de `docker compose`.
 ## Licencia
 
 Este proyecto se publica bajo licencia **MIT**. Ver `LICENSE`.
-
-
