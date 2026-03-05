@@ -77,7 +77,7 @@ Configura como mínimo:
 - `FLASK_SECRET` (cadena larga aleatoria)
 - `AUTH_PASS` (solo se usa para crear el admin inicial si la BD está vacía)
 
-> **No comitees nunca `.env`**.
+
 
 ### 3) Crear carpetas persistentes
 ```bash
@@ -217,15 +217,6 @@ location /stream/ {
 }
 ```
 
----
-
-## Notas de seguridad
-
-- No comitees `.env`.
-- No comitees `./data/users.db`.
-- Usa credenciales de vCenter con privilegios mínimos.
-- Usa un `FLASK_SECRET` fuerte.
-- Para reportar vulnerabilidades, ver `SECURITY.md`.
 
 ---
 
@@ -242,6 +233,8 @@ docker-compose exec scheduler date
 ### `docker compose` no existe
 En algunos Debian antiguos se usa `docker-compose` en vez de `docker compose`.
 
+---
+Si te es útil enviame un mensaje!!
 ---
 
 ## Licencia
