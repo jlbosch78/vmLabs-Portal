@@ -39,19 +39,6 @@ def _env_int(key: str, default: int) -> int:
     except Exception:
         return default
 
-# --- vCenter multi-config ---
-# Soporta:
-#  - VCENTERS_JSON (recomendado) con varios vCenter
-#  - fallback a VCENTER_HOST/VCENTER_USER/VCENTER_PASS (modo legacy, 1 vCenter)
-#
-# Formato VCENTERS_JSON:
-#   {"prof":{"label":"Profesores","host":"vcenter1.usj.es","user":"...","pass":"...","verify_ssl":false},
-#    "dev":{"label":"Desarrollo","host":"vcenter1cs","user":"...","pass":"...","verify_ssl":false},
-#    "prod":{"label":"Producción","host":"vcenter3","user":"...","pass":"...","verify_ssl":true}}
-#
-# Variables opcionales:
-#   DEFAULT_VCENTER=prof
-#   PROF_VCENTER=prof   (vCenter fijo para profesores)
 
 def _normalize_vcenter_cfg(vcid: str, cfg: dict, legacy_verify: bool) -> dict:
     host = (cfg.get("host") or "").strip()
