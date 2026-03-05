@@ -9,7 +9,6 @@ Portal web (Flask) para administrar laboratorios (carpetas) y máquinas virtuale
 - **Scheduler** semanal para encendido/apagado automático por vCenter.
 - Usuarios/roles locales (admin/profesor) almacenados en SQLite.
 
-> Este proyecto **no asigna permisos en vCenter** durante el clonado (la asignación de permisos fue eliminada/deshabilitada).
 
 ---
 
