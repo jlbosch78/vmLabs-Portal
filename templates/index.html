@@ -26,7 +26,7 @@
   </div>
 
   <div class="col-md-6">
-    <label class="form-label">Datastore (selecciona ampcs-pool1 o pool2)</label>
+    <label class="form-label">Datastore</label>
     <select name="datastore" class="form-select" required>
       <option value="" disabled selected>Selecciona datastore…</option>
       {% for d in datastores %}<option value="{{d}}">{{d}}</option>{% endfor %}
@@ -57,7 +57,7 @@
   </div>
 
   <div class="col-md-6" id="teacher_user_wrap" style="display:none;">
-    <label class="form-label">Usuario del profesor (AD)</label>
+    <label class="form-label">Usuario del profesor</label>
     <input class="form-control" name="teacher_user" placeholder="ej. profesor1">
     <div class="form-text">La VM se llamará <code>carpeta-usuario</code> y se guardará en la carpeta <strong>Profesores</strong>.</div>
   </div>
