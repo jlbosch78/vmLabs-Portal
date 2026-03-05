@@ -9,19 +9,21 @@ Portal web (Flask) para administrar laboratorios (carpetas) y máquinas virtuale
 - **Scheduler** semanal para encendido/apagado automático por vCenter.
 - Usuarios/roles locales (admin/profesor) almacenados en SQLite.
 
-> Nota: este proyecto **no asigna permisos en vCenter** durante el clonado (la asignación de permisos fue eliminada).
 
 ---
 
 ## Capturas
 
-Las capturas están en `docs/images/` (en este repo). Si renombraste los ficheros, actualiza las rutas.
+
 
 ### Login
 ![Login](docs/images/1.png)
 
 ### Panel principal (selector de vCenter)
 ![Panel principal](docs/images/2.png)
+
+### Panel principal con vCenter seleccionado
+![Panel principal - vCenter seleccionado](docs/images/3.png)
 
 ### Crear laboratorio (Paso 1)
 ![Crear laboratorio - Paso 1](docs/images/4.png)
@@ -35,14 +37,11 @@ Las capturas están en `docs/images/` (en este repo). Si renombraste los fichero
 ### Programar Inicio/Apagado
 ![Programar Inicio/Apagado](docs/images/7.png)
 
-### Panel principal con vCenter seleccionado
-![Panel principal - vCenter seleccionado](docs/images/3.png)
+### Reglas y ejecuciones del scheduler
+![Reglas del scheduler](docs/images/8.png)
 
 ### Administración de usuarios
 ![Admin Usuarios](docs/images/9.png)
-
-### Reglas y ejecuciones del scheduler
-![Reglas del scheduler](docs/images/8.png)
 
 ### Detalle de laboratorio (acciones por VM)
 ![Detalle de laboratorio](docs/images/6.png)
