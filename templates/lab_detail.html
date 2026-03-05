@@ -22,16 +22,36 @@
 
   <div class="mx-3" style="width:1px;height:38px;background:rgba(0,0,0,.15)"></div>
 
-{% if session.get('role') == 'admin' %}
-  <form id="deleteLabForm" method="post" action="{{ url_for('lab_delete') }}">
-    <input type="hidden" name="lab_name" value="{{ lab_name }}">
-    <button id="deleteLabBtn" class="btn btn-outline-danger" type="submit">
-      Eliminar Lab
-    </button>
-  </form>
-{% endif %}
+  {% if session.get('role') == 'admin' %}
+    <form id="deleteLabForm" method="post" action="{{ url_for('lab_delete') }}">
+      <input type="hidden" name="lab_name" value="{{ lab_name }}">
+      <button id="deleteLabBtn" class="btn btn-outline-danger" type="submit">
+        Eliminar Lab
+      </button>
+    </form>
+  {% endif %}
 
-  <a class="btn btn-outline-primary ms-auto" href="{{ url_for('labs') }}">← Volver</a>
+  <!-- Filtro VMs -->
+  <div class="d-flex align-items-center gap-2 ms-auto">
+    <input id="vmFilterInput" class="form-control form-control-sm"
+           style="max-width:260px"
+           type="text" placeholder="Filtrar VM… (nombre)"
+           autocomplete="off">
+
+    <select id="powerFilter" class="form-select form-select-sm" style="max-width:160px">
+      <option value="all" selected>Todos</option>
+      <option value="poweredOn">ON</option>
+      <option value="poweredOff">OFF</option>
+      <option value="suspended">SUSP</option>
+      <option value="unknown">?</option>
+    </select>
+
+    <button id="clearVmFilterBtn" class="btn btn-outline-secondary btn-sm" type="button">
+      Limpiar
+    </button>
+  </div>
+
+  <a class="btn btn-outline-primary" href="{{ url_for('labs') }}">← Volver</a>
 </div>
 
 <style>
@@ -340,6 +360,7 @@ ${expected}`;
   function dotClass(power) {
     if (power === "poweredOn") return "pwr-dot pwr-on";
     if (power === "poweredOff") return "pwr-dot pwr-off";
+    if (power === "suspended") return "pwr-dot pwr-unk";
     return "pwr-dot pwr-unk";
   }
   function label(power) {
@@ -351,6 +372,12 @@ ${expected}`;
 
   function setDisabled(el, disabled) {
     if (!el) return;
+
+    // Para botones reales, usar disabled nativo
+    if (el.tagName === "BUTTON") {
+      el.disabled = !!disabled;
+    }
+
     if (disabled) {
       el.classList.add("disabled");
       el.setAttribute("aria-disabled", "true");
@@ -379,13 +406,17 @@ ${expected}`;
     const snapCountEl = row.querySelector(".snap-count");
     if (snapCountEl) snapCountEl.textContent = String(parseInt(data.snapshot_count || "0", 10));
 
+    // IMPORTANT: actualizar data-power para que el filtro por estado sea correcto
+    const actionsTd = row.querySelector("td.actions");
+    if (actionsTd) actionsTd.setAttribute("data-power", power);
+
     // enable/disable actions according to new state
     const canOn = (power !== "poweredOn");
     const canOff = (power !== "poweredOff");
     const canReboot = (power === "poweredOn");
     const snapCount = parseInt(data.snapshot_count || "0", 10);
     const canDeleteSnap = snapCount > 0;
-    const canRecreate = snapCount > 0; // tu backend usa baseline rootSnapshotList[0]; si hay snapshots, se habilita
+    const canRecreate = snapCount > 0;
 
     // Energy
     row.querySelectorAll(".js-action-on").forEach(el => setDisabled(el, !canOn));
@@ -404,6 +435,38 @@ ${expected}`;
     const data = await res.json();
     return data;
   }
+
+  // --- Filtro de VMs (nombre + estado) ---
+  function applyVmFilter() {
+    const q = (document.getElementById("vmFilterInput")?.value || "").trim().toLowerCase();
+    const p = (document.getElementById("powerFilter")?.value || "all").trim();
+
+    const rows = document.querySelectorAll("tr[data-moid]");
+    for (const row of rows) {
+      const name = (row.getAttribute("data-vmname") || "").toLowerCase();
+
+      const actionsTd = row.querySelector("td.actions");
+      let power = (actionsTd?.getAttribute("data-power") || "").trim();
+      if (!power) power = "unknown";
+
+      const normPower = (power === "poweredOn" || power === "poweredOff" || power === "suspended") ? power : "unknown";
+
+      const matchName = !q || name.includes(q);
+      const matchPower = (p === "all") || (normPower === p);
+
+      row.style.display = (matchName && matchPower) ? "" : "none";
+    }
+  }
+
+  document.getElementById("vmFilterInput")?.addEventListener("input", applyVmFilter);
+  document.getElementById("powerFilter")?.addEventListener("change", applyVmFilter);
+  document.getElementById("clearVmFilterBtn")?.addEventListener("click", () => {
+    const i = document.getElementById("vmFilterInput");
+    const s = document.getElementById("powerFilter");
+    if (i) i.value = "";
+    if (s) s.value = "all";
+    applyVmFilter();
+  });
 
   async function refreshAllStates() {
     const btn = document.getElementById("refreshStatesBtn");
@@ -430,10 +493,16 @@ ${expected}`;
     const workers = Array.from({ length: Math.min(concurrency, rows.length) }, () => worker());
     await Promise.all(workers);
 
+    // Reaplica filtro tras actualizar estados
+    applyVmFilter();
+
     btn.innerHTML = prev;
     btn.disabled = false;
   }
 
   document.getElementById("refreshStatesBtn").addEventListener("click", refreshAllStates);
+
+  // Aplica filtro al cargar (por si hay valores precargados)
+  applyVmFilter();
 </script>
 {% endblock %}
