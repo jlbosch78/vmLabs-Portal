@@ -179,14 +179,7 @@ location /stream/ {
 }
 ```
 
----
 
-## Notas de seguridad
-
-- No comitees `.env`.
-- No comitees `./data/users.db`.
-- Usa credenciales de vCenter con privilegios mínimos.
-- Usa un `FLASK_SECRET` fuerte.
 
 ---
 
@@ -208,3 +201,5 @@ En algunos Debian antiguos se usa `docker-compose` en vez de `docker compose`.
 ## Licencia
 
 Este proyecto se publica bajo licencia **MIT**. Ver `LICENSE`.
+
+
