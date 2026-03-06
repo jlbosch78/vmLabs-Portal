@@ -231,8 +231,6 @@
               </td>
 
               <td>
-                {# Botón adaptado: verde si habilitada, gris si deshabilitada.
-                   Además indica si es ALL (🌐) o Selected (🎯) #}
                 {% set scope_icon = "🌐" if s.scope == "all" else "🎯" %}
                 <div class="btn-group">
                   <button class="btn btn-sm {% if s.enabled %}btn-outline-success{% else %}btn-outline-secondary{% endif %} dropdown-toggle"
@@ -298,11 +296,16 @@
         </table>
       </div>
 
-      {# Botón recargar página para ver últimas ejecuciones sin salir #}
-      <div class="d-flex justify-content-end gap-2 mt-2">
+      <div class="d-flex justify-content-end gap-2 mt-2 flex-wrap">
+        <a class="btn btn-outline-danger" href="{{ url_for('lab_deletions_page') }}">
+          Programar borrado de laboratorio…
+        </a>
         <button type="button" class="btn btn-outline-secondary" onclick="window.location.reload();">
           Actualizar
         </button>
+      </div>
+      <div class="form-text mt-2">
+        El borrado programado se gestiona en una página separada por seguridad.
       </div>
     </div>
   </div>
@@ -393,7 +396,9 @@
       if (sel.value !== 'all') return;
 
       const typed = prompt(
-        "⚠️ Esta regla se aplicará a TODOS los labs del prefijo {{ prefix }}.\n\n" +
+        "⚠️ Esta regla se aplicará a TODOS los labs del prefijo {{ prefix }}.
+
+" +
         "Para confirmar, escribe: TODOS",
         ""
       );
@@ -409,7 +414,7 @@
     });
   })();
 
-  // Activar/desactivar bloques ON/OFF (deshabilita inputs y evita que 'required' bloquee)
+  // Activar/desactivar bloques ON/OFF
   (function(){
     const onToggle = document.getElementById("enable_on");
     const offToggle = document.getElementById("enable_off");

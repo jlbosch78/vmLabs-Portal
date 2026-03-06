@@ -1,0 +1,172 @@
+{% extends "layout.html" %}
+{% block body %}
+<h2 class="fw-bold mb-2 text-danger">Programar borrado de laboratorio</h2>
+<p class="text-contrast-70 mb-3">
+  ⚠️ Esta acción es destructiva: elimina snapshots, VMs, discos y la carpeta del lab.
+</p>
+
+{% if active_vcenter_label %}
+<div class="alert alert-info shadow-sm">
+  vCenter activo: <strong>{{ active_vcenter_label }}</strong> · {{ active_vcenter_host }}
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <!-- Crear tarea -->
+  <div class="col-12 col-lg-5">
+    <div class="p-3 border rounded-3">
+      <div class="fw-bold mb-2">Nueva programación</div>
+
+      <form id="createDeleteTaskForm" method="post" action="{{ url_for('lab_deletions_create') }}" class="row g-3">
+        <div class="col-12">
+          <label class="form-label">Laboratorio</label>
+          <select class="form-select" name="lab_name" id="labSel" required>
+            <option value="" selected disabled>Selecciona un lab…</option>
+            {% for lab in labs %}
+              <option value="{{ lab.name }}">{{ lab.name }} ({{ lab.count }} VM)</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Fecha y hora de ejecución</label>
+          <input class="form-control" type="datetime-local" name="run_at" required>
+          <div class="form-text">Se usa la zona horaria del servidor/contenedor (TZ).</div>
+        </div>
+
+        <input type="hidden" name="confirm" id="confirmHidden" value="">
+
+        <div class="col-12">
+          <button class="btn btn-danger" type="submit">Programar borrado</button>
+          <a class="btn btn-outline-primary ms-2" href="{{ url_for('labs') }}">← Volver a Labs</a>
+        </div>
+
+        <div class="alert alert-warning mb-0">
+          Al guardar se pedirá confirmación escribiendo <strong>ELIMINAR</strong> y el nombre del lab.
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Lista de tareas -->
+  <div class="col-12 col-lg-7">
+    <div class="p-3 border rounded-3">
+      <div class="fw-bold mb-2">Borrados programados</div>
+
+      <div class="table-responsive">
+        <table class="table portal-table align-middle">
+          <thead>
+            <tr>
+              <th style="width:70px">ID</th>
+              <th>Lab</th>
+              <th style="width:190px">Ejecución</th>
+              <th style="width:110px">Estado</th>
+              <th style="width:150px">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in tasks %}
+              <tr>
+                <td class="text-contrast-70">{{ t.id }}</td>
+                <td class="fw-medium">{{ t.lab_name }}</td>
+                <td class="text-contrast-70">{{ t.run_at }}</td>
+                <td>
+                  {% if t.status == 'pending' %}
+                    <span class="badge text-bg-warning">PEND</span>
+                  {% elif t.status == 'running' %}
+                    <span class="badge text-bg-info">RUN</span>
+                  {% elif t.status == 'done' %}
+                    <span class="badge text-bg-success">DONE</span>
+                  {% elif t.status == 'canceled' %}
+                    <span class="badge text-bg-light border">CANCEL</span>
+                  {% else %}
+                    <span class="badge text-bg-danger">ERR</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if t.status == 'pending' %}
+                    <form method="post" action="{{ url_for('lab_deletions_cancel', task_id=t.id) }}"
+                          onsubmit="return confirmCancelDeleteTask(this);">
+                      <input type="hidden" name="confirm" value="">
+                      <button class="btn btn-sm btn-outline-secondary" type="submit">Cancelar</button>
+                    </form>
+                  {% else %}
+                    <span class="small text-contrast-70">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% if t.last_error %}
+              <tr>
+                <td></td>
+                <td colspan="4">
+                  <div class="small text-danger">
+                    Error: {{ t.last_error }}
+                  </div>
+                </td>
+              </tr>
+              {% endif %}
+            {% else %}
+              <tr><td colspan="5" class="text-muted">No hay borrados programados.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex justify-content-end gap-2 mt-2">
+        <button type="button" class="btn btn-outline-secondary" onclick="window.location.reload();">Actualizar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function(){
+    const form = document.getElementById("createDeleteTaskForm");
+    const sel = document.getElementById("labSel");
+    const hidden = document.getElementById("confirmHidden");
+
+    form.addEventListener("submit", function(e){
+      const lab = (sel.value || "").trim();
+      if (!lab) return;
+
+      const typed = prompt(
+        "⚠️ Vas a programar el BORRADO del lab (destructivo):\n\n" + lab +
+        "\n\nEscribe ELIMINAR para confirmar:",
+        ""
+      );
+
+      if (typed === null || typed.trim().toUpperCase() !== "ELIMINAR") {
+        e.preventDefault();
+        hidden.value = "";
+        alert("Confirmación incorrecta. No se programó el borrado.");
+        return;
+      }
+
+      const typed2 = prompt(
+        "Último paso: escribe EXACTAMENTE el nombre del lab para confirmar:\n\n" + lab,
+        ""
+      );
+
+      if (typed2 === null || typed2.trim() !== lab) {
+        e.preventDefault();
+        hidden.value = "";
+        alert("Confirmación incorrecta. No se programó el borrado.");
+        return;
+      }
+
+      hidden.value = "OK";
+    });
+  })();
+
+  function confirmCancelDeleteTask(formEl){
+    const typed = prompt("Cancelar borrado: escribe SI para confirmar:", "");
+    if (typed === null) return false;
+    if (typed.trim().toUpperCase() !== "SI") {
+      alert("Confirmación incorrecta.");
+      return false;
+    }
+    formEl.querySelector('input[name="confirm"]').value = "SI";
+    return true;
+  }
+</script>
+{% endblock %}

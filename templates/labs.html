@@ -3,6 +3,14 @@
 <h2 class="fw-bold mb-2 text-primary">Ver Labs</h2>
 <p class="text-contrast-70 mb-4">Selecciona un laboratorio (carpeta).</p>
 
+{% if session.get('role') == 'admin' %}
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <a class="btn btn-outline-danger" href="{{ url_for('lab_deletions_page') }}">
+      Programar borrado de laboratorio…
+    </a>
+  </div>
+{% endif %}
+
 <div class="list-group">
   {% for lab in labs %}
     <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"

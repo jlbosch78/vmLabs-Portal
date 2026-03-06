@@ -2116,10 +2116,346 @@ def account_password():
         return redirect(url_for("home"))
 
     return render_template("account_password.html")
+    
+    
+
+
+
+# --- UI Routes ---
+@app.get("/lab-deletions")
+@login_required
+@role_required("admin")
+def lab_deletions_page():
+    # vCenter activo (usa tu función actual; en multi-vCenter, viene de session)
+    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or os.getenv("DEFAULT_VCENTER", "prof")
+    # labs (para el selector)
+    with vcenter_ctx(vcenter_id) as (_, content):
+        lab_names = list_lab_folders(content, prefix=LAB_FOLDER_PREFIX)
+        labs = []
+        for name in lab_names:
+            folder = find_folder_by_name(content, name)
+            try:
+                c = count_vms_in_folder(content, folder) if folder else 0
+            except Exception:
+                c = 0
+            labs.append({"name": name, "count": c})
+
+    tasks_rows = _fetch_lab_delete_tasks(vcenter_id=vcenter_id, limit=200)
+    tasks = [{"id": r[0], "lab_name": r[1], "run_at": r[2], "status": r[3], "last_error": r[4]} for r in tasks_rows]
+
+    return render_template("lab_deletions.html", labs=labs, tasks=tasks)
+
+@app.post("/lab-deletions/create")
+@login_required
+@role_required("admin")
+def lab_deletions_create():
+    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or os.getenv("DEFAULT_VCENTER", "prof")
+    lab_name = (request.form.get("lab_name") or "").strip()
+    run_at = (request.form.get("run_at") or "").strip()
+    confirm = (request.form.get("confirm") or "").strip()
+
+    if not lab_name or not run_at:
+        flash("Faltan datos.", "danger")
+        return redirect(url_for("lab_deletions_page"))
+
+    if confirm != "OK":
+        flash("Confirmación inválida.", "danger")
+        return redirect(url_for("lab_deletions_page"))
+
+    # Normaliza datetime-local (YYYY-MM-DDTHH:MM) -> YYYY-MM-DD HH:MM:00
+    try:
+        dt = datetime.fromisoformat(run_at.replace("T", " "))
+        run_at_db = dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        flash("Fecha/hora inválida.", "danger")
+        return redirect(url_for("lab_deletions_page"))
+
+    if dt <= datetime.now():
+        flash("La fecha/hora debe ser futura.", "warning")
+        return redirect(url_for("lab_deletions_page"))
+
+    _create_lab_delete_task(vcenter_id, lab_name, run_at_db, session.get("username") or "admin")
+    flash("Borrado programado.", "success")
+    return redirect(url_for("lab_deletions_page"))
+
+@app.post("/lab-deletions/<int:task_id>/cancel")
+@login_required
+@role_required("admin")
+def lab_deletions_cancel(task_id: int):
+    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or os.getenv("DEFAULT_VCENTER", "prof")
+    confirm = (request.form.get("confirm") or "").strip().upper()
+    if confirm != "SI":
+        flash("Confirmación inválida.", "danger")
+        return redirect(url_for("lab_deletions_page"))
+
+    _cancel_lab_delete_task(vcenter_id, task_id)
+    flash("Borrado cancelado (si estaba pendiente).", "success")
+    return redirect(url_for("lab_deletions_page"))
+
+# --- Ejecutar borrado real (reutiliza tu lógica actual de lab_delete) ---
+
+def _wait_task(task, timeout_sec: int = 1800):
+    """
+    Espera a que una task de vCenter termine.
+    Retorna (ok: bool, err: str|None)
+    """
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            st = task.info.state
+            if st == vim.TaskInfo.State.success:
+                return True, None
+            if st == vim.TaskInfo.State.error:
+                err = task.info.error
+                msg = getattr(err, "msg", str(err)) if err else "unknown error"
+                return False, msg
+        except Exception as e:
+            return False, f"task check error: {e}"
+        time.sleep(1)
+    return False, "timeout"
+
+
+def delete_lab_internal(content, lab_name: str) -> dict:
+    folder = find_folder_by_name(content, lab_name)
+    if not folder:
+        return {"ok": False, "error": "folder not found", "deleted_vms": 0}
+
+    # 1) Recoger VMs recursivamente (sin templates)
+    view = content.viewManager.CreateContainerView(folder, [vim.VirtualMachine], True)
+    vms = []
+    try:
+        for vm in view.view:
+            try:
+                if vm.config and vm.config.template:
+                    continue
+            except Exception:
+                pass
+            vms.append(vm)
+    finally:
+        view.Destroy()
+
+    # 2) Eliminar snapshots (si existen) y esperar a que terminen
+    for vm in vms:
+        try:
+            snap = getattr(vm, "snapshot", None)
+            if snap is not None and getattr(snap, "rootSnapshotList", None):
+                t = vm.RemoveAllSnapshots_Task()
+                ok, _err = _wait_task(t, timeout_sec=1800)
+                if not ok:
+                    # No abortamos aún: intentaremos borrar igualmente.
+                    pass
+        except Exception:
+            pass
+
+    # 3) Apagar + destruir VMs (esperar cada una)
+    deleted = 0
+    for vm in vms:
+        vm_name = getattr(vm, "name", "?")
+        try:
+            try:
+                if str(vm.runtime.powerState) == "poweredOn":
+                    vm.PowerOffVM_Task()
+                    time.sleep(1)
+            except Exception:
+                pass
+
+            tdel = vm.Destroy_Task()
+            ok, err = _wait_task(tdel, timeout_sec=1800)
+            if ok:
+                deleted += 1
+            else:
+                # Si una VM no se borra, la carpeta NO se podrá borrar.
+                return {"ok": False, "error": f"vm destroy failed: {vm_name}: {err}", "deleted_vms": deleted}
+        except Exception as e:
+            return {"ok": False, "error": f"vm destroy exception: {vm_name}: {e}", "deleted_vms": deleted}
+
+    # 4) Esperar a que la carpeta quede vacía (latencia de inventario)
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        try:
+            children = list(getattr(folder, "childEntity", []) or [])
+            if len(children) == 0:
+                break
+        except Exception:
+            break
+        time.sleep(2)
+
+    # 5) Si quedan subcarpetas vacías, intentar destruirlas
+    try:
+        children = list(getattr(folder, "childEntity", []) or [])
+        for ch in children:
+            if isinstance(ch, vim.Folder):
+                try:
+                    tsub = ch.Destroy_Task()
+                    _wait_task(tsub, timeout_sec=300)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    # 6) Destruir carpeta del lab (Destroy_Task + esperar)
+    try:
+        tf = folder.Destroy_Task()
+        ok, err = _wait_task(tf, timeout_sec=600)
+        if not ok:
+            return {"ok": False, "error": f"folder destroy failed: {err}", "deleted_vms": deleted}
+    except Exception as e:
+        return {"ok": False, "error": f"folder destroy exception: {e}", "deleted_vms": deleted}
+
+    return {"ok": True, "deleted_vms": deleted}
+
+
+# --- Scheduler hook: procesar tareas de borrado vencidas ---
+def process_due_lab_deletions(now: datetime = None):
+    if now is None:
+        now = datetime.now()
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    conn = db_connect()
+    try:
+        due = conn.execute(
+            """SELECT id, vcenter_id, lab_name
+               FROM lab_delete_tasks
+               WHERE status='pending' AND run_at <= ?
+               ORDER BY run_at ASC, id ASC
+               LIMIT 10""",
+            (now_str,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    for row in due:
+        task_id, vcenter_id, lab_name = int(row[0]), row[1], row[2]
+        started = _now_iso()
+
+        # lock "running" (best effort)
+        conn = db_connect()
+        try:
+            cur = conn.execute(
+                """UPDATE lab_delete_tasks
+                   SET status='running', started_at=?, updated_at=?
+                   WHERE id=? AND status='pending'""",
+                (started, started, task_id)
+            )
+            conn.commit()
+            if cur.rowcount != 1:
+                continue
+        finally:
+            conn.close()
+
+        ok = False
+        last_error = None
+        deleted_vms = 0
+
+        try:
+            with vcenter_ctx(vcenter_id) as (_, content):
+                r = delete_lab_internal(content, lab_name)
+                ok = bool(r.get("ok"))
+                deleted_vms = int(r.get("deleted_vms") or 0)
+                if not ok:
+                    last_error = r.get("error") or "unknown"
+        except Exception as e:
+            ok = False
+            last_error = str(e)
+
+        finished = _now_iso()
+        conn = db_connect()
+        try:
+            if ok:
+                conn.execute(
+                    """UPDATE lab_delete_tasks
+                       SET status='done', finished_at=?, updated_at=?, last_error=NULL
+                       WHERE id=?""",
+                    (finished, finished, task_id)
+                )
+            else:
+                conn.execute(
+                    """UPDATE lab_delete_tasks
+                       SET status='error', finished_at=?, updated_at=?, last_error=?
+                       WHERE id=?""",
+                    (finished, finished, last_error, task_id)
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+
+
+
 
 # ---------------- SCHEDULE (Programación energía) ----------------
 
 DOW_MAP = {0: "L", 1: "M", 2: "X", 3: "J", 4: "V", 5: "S", 6: "D"}
+
+
+def init_lab_deletions_db():
+    conn = db_connect()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS lab_delete_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vcenter_id TEXT NOT NULL,
+                lab_name TEXT NOT NULL,
+                run_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','running','done','error','canceled')),
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                last_error TEXT
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+def _now_iso():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _fetch_lab_delete_tasks(vcenter_id: str, limit: int = 100):
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """SELECT id, lab_name, run_at, status, last_error
+               FROM lab_delete_tasks
+               WHERE vcenter_id=?
+               ORDER BY run_at DESC, id DESC
+               LIMIT ?""",
+            (vcenter_id, limit)
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+def _create_lab_delete_task(vcenter_id: str, lab_name: str, run_at: str, created_by: str):
+    now = _now_iso()
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO lab_delete_tasks
+               (vcenter_id, lab_name, run_at, status, created_by, created_at, updated_at)
+               VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
+            (vcenter_id, lab_name, run_at, created_by, now, now)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+def _cancel_lab_delete_task(vcenter_id: str, task_id: int):
+    now = _now_iso()
+    conn = db_connect()
+    try:
+        conn.execute(
+            """UPDATE lab_delete_tasks
+               SET status='canceled', updated_at=?
+               WHERE id=? AND vcenter_id=? AND status='pending'""",
+            (now, task_id, vcenter_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 def init_schedule_db():
     conn = db_connect()

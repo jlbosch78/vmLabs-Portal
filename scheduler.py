@@ -5,7 +5,9 @@ import fcntl
 import inspect
 from datetime import datetime
 from dotenv import load_dotenv
-load_dotenv()  # intenta leer .env del directorio actual si existe
+
+# Intenta leer .env del directorio actual si existe (en Docker suele venir por env_file)
+load_dotenv()
 
 # Aplica TZ (si existe)
 try:
@@ -19,7 +21,7 @@ LOCK_PATH = os.getenv("VMLABS_SCHED_LOCK", "/tmp/vmlabs_scheduler.lock")
 SLEEP_SEC = int(os.getenv("VMLABS_SCHED_SLEEP_SEC", "20"))
 TZ = os.getenv("TZ", "Europe/Madrid")
 
-# NUEVO: control de verbosidad por .env
+# Control de verbosidad por .env
 VERBOSE = os.getenv("VMLABS_SCHED_VERBOSE", "0").strip().lower() in ("1", "true", "yes", "on", "y")
 
 DOW_MAP = {0: "L", 1: "M", 2: "X", 3: "J", 4: "V", 5: "S", 6: "D"}
@@ -45,6 +47,7 @@ def _run_schedule_action(row, action: str, minute_key: str, vcenter_id: str | No
     """Compat: llama a la función interna con o sin vcenter_id."""
     fn = getattr(app, "_run_schedule_action", None)
     if not fn:
+        # fallback
         return app.process_due_schedules(now=datetime.now())
 
     sig = inspect.signature(fn)
@@ -56,12 +59,37 @@ def _run_schedule_action(row, action: str, minute_key: str, vcenter_id: str | No
         return fn(row, action, minute_key)
 
 
+def _process_due_lab_deletions(now: datetime):
+    """
+    Hook para borrados programados.
+    Se ejecuta solo si app.py expone process_due_lab_deletions().
+    """
+    fn = getattr(app, "process_due_lab_deletions", None)
+    if not fn:
+        return
+    try:
+        fn(now=now)
+    except TypeError:
+        # Por si tu firma es distinta
+        fn(now)
+    except Exception as e:
+        print("[scheduler] lab deletions ERROR:", repr(e), flush=True)
+
+
 def main():
     # Asegura tablas schedule
     try:
         app.init_schedule_db()
     except Exception as e:
         print("[scheduler] init_schedule_db ERROR:", e, flush=True)
+
+    # NUEVO: Asegura tablas de borrados programados (si está implementado en app.py)
+    try:
+        init_del = getattr(app, "init_lab_deletions_db", None)
+        if init_del:
+            init_del()
+    except Exception as e:
+        print("[scheduler] init_lab_deletions_db ERROR:", e, flush=True)
 
     try:
         _lock_file = acquire_lock()
@@ -121,6 +149,9 @@ def main():
 
                     if due == 0 and VERBOSE:
                         print(f"[scheduler] {minute_key} tick ok (no due rules)", flush=True)
+
+                # NUEVO: ejecutar borrados programados (one-shot) si existen
+                _process_due_lab_deletions(now)
 
             except Exception as e:
                 print("[scheduler] ERROR:", repr(e), flush=True)
