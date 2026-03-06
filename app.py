@@ -1701,6 +1701,90 @@ def plan_distribution():
                            make_teacher=make_teacher,
                            teacher_user=teacher_user)
 
+# --- NUEVO: Paso 3 (dry-run) antes de iniciar el job ---
+# Inserta ESTE endpoint justo ANTES de start_job_with_distribution()
+
+@app.route("/confirm_job_with_distribution", methods=["POST"])
+@login_required
+@role_required("admin")
+def confirm_job_with_distribution():
+    template = request.form.get("template", "").strip()
+    folder = request.form.get("folder", "").strip()
+    datastore = request.form.get("datastore", "").strip()
+    network = request.form.get("network", "").strip()
+    csv_path = request.form.get("csv_path", "").strip()
+    host_names = request.form.get("host_names", "").strip()
+
+    power_on = request.form.get("power_on") == "on"
+    make_snapshot = request.form.get("make_snapshot") == "on"
+
+    make_teacher = request.form.get("make_teacher") == "on"
+    teacher_user = request.form.get("teacher_user", "").strip()
+    teacher_host = request.form.get("teacher_host", "").strip()
+
+    if not all([template, folder, datastore, network, csv_path, host_names]):
+        flash("Datos incompletos.", "danger")
+        return redirect(url_for("create_lab"))
+
+    hosts = host_names.split("|") if host_names else []
+    if not hosts:
+        flash("No hay hosts para distribuir.", "danger")
+        return redirect(url_for("create_lab"))
+
+    # Leer usuarios del CSV y validar conteo
+    usuarios = _read_csv_users(csv_path)
+    total_csv = len(usuarios)
+    if total_csv <= 0:
+        flash("El CSV no contiene usuarios válidos.", "danger")
+        return redirect(url_for("create_lab"))
+
+    # Parsear asignaciones por host
+    counts = []
+    total_counts = 0
+    host_inputs = []
+    for idx, h in enumerate(hosts):
+        val = (request.form.get(f"host_{idx}", "0") or "0").strip()
+        try:
+            n = int(val)
+            if n < 0:
+                n = 0
+        except Exception:
+            n = 0
+        counts.append((h, n))
+        total_counts += n
+        host_inputs.append((idx, (h, n)))
+
+    if total_counts != total_csv:
+        flash(f"La suma de asignaciones ({total_counts}) no coincide con el total del CSV ({total_csv}).", "danger")
+        return redirect(url_for("create_lab"))
+
+    # Vista previa de nombres (primeros 10)
+    preview_n = 10
+    vm_preview = [f"{folder}-{u}" for u in usuarios[:preview_n]]
+    remaining_count = max(0, total_csv - len(vm_preview))
+
+    return render_template(
+        "confirm_distribution.html",
+        template=template,
+        folder=folder,
+        datastore=datastore,
+        network=network,
+        csv_path=csv_path,
+        host_names=host_names,
+        counts=counts,
+        total_counts=total_counts,
+        total_csv=total_csv,
+        vm_preview=vm_preview,
+        remaining_count=remaining_count,
+        host_inputs=host_inputs,
+        power_on=power_on,
+        make_snapshot=make_snapshot,
+        make_teacher=make_teacher,
+        teacher_user=teacher_user,
+        teacher_host=teacher_host,
+    )
+
+
 @app.route("/start_job_with_distribution", methods=["POST"])
 @login_required
 @role_required("admin")

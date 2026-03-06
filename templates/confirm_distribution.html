@@ -1,0 +1,128 @@
+{% extends "layout.html" %}
+{% block body %}
+<h2 class="fw-bold mb-2 text-primary">Paso 3 · Confirmar creación del laboratorio</h2>
+<p class="text-contrast-70 mb-3">Revisa el resumen. Al confirmar se iniciará el clonado en vCenter.</p>
+
+{% if active_vcenter_label %}
+<div class="alert alert-info shadow-sm">
+  vCenter activo: <strong>{{ active_vcenter_label }}</strong> · {{ active_vcenter_host }}
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-12 col-lg-6">
+    <div class="p-3 border rounded-3 h-100">
+      <div class="fw-bold mb-2">Resumen</div>
+
+      <div class="small text-contrast-70">
+        <div><strong>Template:</strong> {{ template }}</div>
+        <div><strong>Carpeta destino:</strong> {{ folder }}</div>
+        <div><strong>Datastore:</strong> {{ datastore }}</div>
+        <div><strong>Red:</strong> {{ network }}</div>
+        <div><strong>Usuarios (CSV):</strong> {{ total_csv }}</div>
+        <div><strong>Encender tras crear:</strong> {{ "Sí" if power_on else "No" }}</div>
+        <div><strong>Snapshot baseline:</strong> {{ "Sí" if make_snapshot else "No" }}</div>
+        <div class="mt-2">
+          <strong>VM profesor:</strong>
+          {% if make_teacher and teacher_user %}
+            Sí · <code>{{ folder }}-{{ teacher_user }}</code> (host: {{ teacher_host or "auto" }})
+          {% else %}
+            No
+          {% endif %}
+        </div>
+      </div>
+
+      <hr class="my-3">
+
+      <div class="fw-bold mb-2">Vista previa de nombres</div>
+      <ul class="small text-contrast-70 mb-0">
+        {% for n in vm_preview %}
+          <li><code>{{ n }}</code></li>
+        {% endfor %}
+        {% if remaining_count > 0 %}
+          <li>… y {{ remaining_count }} VM(s) más</li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-6">
+    <div class="p-3 border rounded-3 h-100">
+      <div class="fw-bold mb-2">Distribución por host</div>
+      <div class="table-responsive">
+        <table class="table align-middle portal-table mb-0">
+          <thead>
+            <tr><th>Host</th><th style="width:160px">VMs</th></tr>
+          </thead>
+          <tbody>
+            {% for h, n in counts %}
+              <tr>
+                <td class="fw-medium">{{ h }}</td>
+                <td><span class="badge text-bg-light border">{{ n }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td class="fw-bold">Total</td>
+              <td class="fw-bold">{{ total_counts }}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="alert alert-warning mt-3 mb-0">
+        Para confirmar la creación, escribe <strong>{{ folder }}</strong> en el cuadro que aparecerá al pulsar “Confirmar y crear”.
+      </div>
+    </div>
+  </div>
+</div>
+
+<form id="confirmCreateForm" method="post" action="{{ url_for('start_job_with_distribution') }}" class="mt-3">
+  <input type="hidden" name="template" value="{{ template }}">
+  <input type="hidden" name="folder" value="{{ folder }}">
+  <input type="hidden" name="datastore" value="{{ datastore }}">
+  <input type="hidden" name="network" value="{{ network }}">
+  <input type="hidden" name="csv_path" value="{{ csv_path }}">
+  <input type="hidden" name="host_names" value="{{ host_names }}">
+
+  {% for idx, pair in host_inputs %}
+    <input type="hidden" name="host_{{ idx }}" value="{{ pair[1] }}">
+  {% endfor %}
+
+  {% if power_on %}
+    <input type="hidden" name="power_on" value="on">
+  {% endif %}
+  {% if make_snapshot %}
+    <input type="hidden" name="make_snapshot" value="on">
+  {% endif %}
+
+  {% if make_teacher %}
+    <input type="hidden" name="make_teacher" value="on">
+    <input type="hidden" name="teacher_user" value="{{ teacher_user }}">
+    <input type="hidden" name="teacher_host" value="{{ teacher_host }}">
+  {% endif %}
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary" type="submit">Confirmar y crear</button>
+    <a class="btn btn-outline-primary" href="javascript:history.back()">← Volver</a>
+  </div>
+</form>
+
+<script>
+  (function(){
+    const form = document.getElementById("confirmCreateForm");
+    const expected = {{ folder|tojson }};
+    form.addEventListener("submit", function(e){
+      const typed = prompt(
+        "⚠️ Confirmación: escribe EXACTAMENTE el nombre de la carpeta del lab para iniciar el clonado:\n\n" + expected,
+        ""
+      );
+      if (typed === null || typed.trim() !== expected) {
+        e.preventDefault();
+        alert("Confirmación incorrecta. No se inició la creación.");
+      }
+    });
+  })();
+</script>
+{% endblock %}

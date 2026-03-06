@@ -3,7 +3,7 @@
 <h2 class="fw-bold mb-2 text-primary">Paso 2 · Distribuir {{ total }} VM(s) por host</h2>
 <p class="text-contrast-70 mb-4">Ajusta las cantidades por host. La suma debe coincidir con el total.</p>
 
-<form method="post" action="{{ url_for('start_job_with_distribution') }}">
+<form method="post" action="{{ url_for('confirm_job_with_distribution') }}">
   <input type="hidden" name="template" value="{{ template }}">
   <input type="hidden" name="folder" value="{{ folder }}">
   <input type="hidden" name="datastore" value="{{ datastore }}">
@@ -37,6 +37,7 @@
     <span id="sum" class="badge rounded-pill text-bg-success">0</span>
     / <span class="fw-bold">{{ total }}</span>
   </p>
+
   {% if make_teacher and teacher_user %}
     <div class="alert alert-info">
       Se creará una VM para el profesor: <strong>{{ folder }}-{{ teacher_user }}</strong> en la carpeta <strong>Profesores</strong>.
@@ -64,9 +65,12 @@
     </label>
   </div>
 
+  <div class="alert alert-secondary">
+    Siguiente paso: verás un <strong>resumen</strong> y tendrás que confirmar antes de iniciar el clonado.
+  </div>
+
   <div class="d-flex gap-2">
-    <button id="launch" class="btn btn-primary" type="submit" disabled>Crear laboratorio</button>
-    <!-- AQUÍ EL CAMBIO: antes era url_for('index') -->
+    <button id="launch" class="btn btn-primary" type="submit" disabled>Continuar → Resumen</button>
     <a class="btn btn-outline-primary" href="{{ url_for('create_lab') }}">← Volver</a>
   </div>
 
