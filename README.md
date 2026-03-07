@@ -5,10 +5,11 @@ Portal web (Flask) para administrar laboratorios (carpetas) y máquinas virtuale
 - Soporte **multi‑vCenter** (el admin puede elegir el vCenter activo desde la UI; el rol profesor puede quedar “fijado” a un vCenter).
 - Creación de labs clonando VMs desde un **template**, con **distribución por hosts** a partir de un CSV.
 - Acciones de energía por VM y por lab (ON/OFF/Reboot).
+- VMRC para acceder a la MV.
 - Snapshots: crear, borrar el último, revertir a baseline (“recrear”).
-- **Scheduler** semanal para encendido/apagado automático por vCenter.
+- **Scheduler** semanal para encendido/apagado automático por vCenter. Posibilidad de programar eliminacion completa de Lab.
 - Usuarios/roles locales (admin/profesor) almacenados en SQLite.
-
+- Plantillas - Profesor puede publicar/eliminar plantillas por Lab (3 máx) - Admin puede ver/eliminar todas las plantillas.
 
 ---
 
