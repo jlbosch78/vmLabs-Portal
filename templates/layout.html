@@ -71,13 +71,19 @@
                 <li><span class="dropdown-item disabled">Admin Labs (elige vCenter)</span></li>
               {% endif %}
 
+              {% if session.get('role') == 'profesor' %}
+                <li><a class="dropdown-item" href="{{ url_for('my_templates') }}">Mis plantillas</a></li>
+              {% endif %}
+
               {% if is_admin %}
                 {% if vc_ready %}
                   <li><a class="dropdown-item" href="{{ url_for('create_lab') }}">Crear Labs</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('schedule_page') }}">Programar Inicio/Apagado</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('teacher_templates_admin') }}">Plantillas profesores</a></li>
                 {% else %}
                   <li><span class="dropdown-item disabled">Crear Labs (elige vCenter)</span></li>
                   <li><span class="dropdown-item disabled">Programar Inicio/Apagado (elige vCenter)</span></li>
+                  <li><span class="dropdown-item disabled">Plantillas profesores (elige vCenter)</span></li>
                 {% endif %}
                 <li><a class="dropdown-item" href="{{ url_for('users_admin') }}">Admin Usuarios</a></li>
               {% endif %}

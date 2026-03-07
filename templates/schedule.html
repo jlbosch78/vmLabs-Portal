@@ -1,439 +1,385 @@
 {% extends "layout.html" %}
+
 {% block body %}
-
-<h2 class="fw-bold mb-2 text-primary">Programar Inicio/Apagado</h2>
-<p class="text-contrast-70 mb-4">
-  Define reglas semanales para encender/apagar labs automáticamente (evita que queden encendidos).
-</p>
-
-{% if active_vcenter_label %}
-<div class="alert alert-info shadow-sm">
-  vCenter activo: <strong>{{ active_vcenter_label }}</strong> · {{ active_vcenter_host }}
-</div>
-{% endif %}
-
-<div class="row g-3">
-
-  <!-- FORM: crear/editar -->
-  <div class="col-12">
-    <div class="p-3 border rounded-3">
-      <div class="d-flex justify-content-between align-items-center mb-2">
-        <div class="fw-bold">Regla semanal</div>
-        {% if edit %}
-          <span class="badge text-bg-light border">Editando ID {{ edit.id }}</span>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold mb-1 text-primary">🗓️ Programar Inicio/Apagado</h2>
+            <p class="text-muted mb-0">
+                Reglas semanales de automatización para optimizar costes y recursos.
+            </p>
+        </div>
+        {% if active_vcenter_label %}
+        <div class="card bg-light border-0 shadow-sm">
+            <div class="card-body py-2 px-3">
+                <small class="text-muted d-block">vCenter Activo</small>
+                <span class="fw-bold text-dark">{{ active_vcenter_label }}</span> 
+                <span class="badge bg-primary ms-2">{{ active_vcenter_host }}</span>
+            </div>
+        </div>
         {% endif %}
-      </div>
-
-      <form id="scheduleForm" method="post" action="{{ url_for('schedule_save') }}" class="row g-3">
-        <input type="hidden" name="id" value="{{ edit.id if edit else '' }}">
-        <input type="hidden" name="confirm_all" id="confirmAllHidden" value="">
-
-        <div class="col-md-6">
-          <label class="form-label">Nombre</label>
-          <input class="form-control" name="name" placeholder="Ej. Labs mañana/tarde"
-                 value="{{ edit.name if edit else '' }}">
-        </div>
-
-        <div class="col-md-6">
-          <label class="form-label">Aplicar a</label>
-
-          {# Por defecto: selected en creación. En edición, respeta el scope guardado. #}
-          <select class="form-select" name="scope" id="scopeSel">
-            <option value="selected" {% if (not edit) or (edit and edit.scope=='selected') %}selected{% endif %}>
-              Seleccionar labs…
-            </option>
-            <option value="all" {% if edit and edit.scope=='all' %}selected{% endif %}>
-              Todos los labs (prefijo {{ prefix }})
-            </option>
-          </select>
-
-          <div class="form-text">“Todos” usa el prefijo {{ prefix }} en tiempo de ejecución.</div>
-
-          <div id="scopeAllWarn" class="alert alert-danger mt-2" style="display:none;">
-            <strong>¡Atención!</strong> Esta regla se aplicará a <u>TODOS</u> los labs con prefijo
-            <strong>{{ prefix }}</strong> en el vCenter activo.
-            Se pedirá confirmación al guardar.
-          </div>
-        </div>
-
-        <div class="col-12" id="labsMultiWrap" style="display:none;">
-          <label class="form-label">Labs (solo si “Seleccionar labs”)</label>
-          <select class="form-select" name="labs" multiple size="7">
-            {% for lab in labs %}
-              <option value="{{ lab.name }}"
-                {% if edit and edit.scope=='selected' and (lab.name in edit.labs) %}selected{% endif %}>
-                {{ lab.name }}
-              </option>
-            {% endfor %}
-          </select>
-          <div class="form-text">Ctrl/⌘ para seleccionar varios.</div>
-        </div>
-
-        <hr class="my-2">
-
-        {% set enable_on_checked = (not edit) or ((edit.on_time|default('')) and (edit.on_days|default([])) ) %}
-        {% set enable_off_checked = (not edit) or ((edit.off_time|default('')) and (edit.off_days|default([])) ) %}
-
-        <!-- Switches ON/OFF -->
-        <div class="col-12 d-flex flex-wrap gap-4 align-items-center">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="enable_on" name="enable_on"
-                   {% if enable_on_checked %}checked{% endif %}>
-            <label class="form-check-label" for="enable_on">Activar encendido</label>
-          </div>
-
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="enable_off" name="enable_off"
-                   {% if enable_off_checked %}checked{% endif %}>
-            <label class="form-check-label" for="enable_off">Activar apagado</label>
-          </div>
-
-          <div class="small text-contrast-70">
-            Puedes crear reglas solo de apagado (recomendado) o solo de encendido.
-          </div>
-        </div>
-
-        <!-- ON -->
-        <div class="col-md-6">
-          <div class="fw-bold mb-2">Encender</div>
-          <div class="d-flex flex-wrap gap-2 mb-2">
-            {% for d in ["L","M","X","J","V","S","D"] %}
-              <div class="form-check">
-                <input class="form-check-input on-field" type="checkbox" name="on_days" value="{{ d }}" id="on_{{ d }}"
-                       {% if not edit or (d in edit.on_days) %}checked{% endif %}>
-                <label class="form-check-label" for="on_{{ d }}">{{ d }}</label>
-              </div>
-            {% endfor %}
-          </div>
-          <label class="form-label">Hora</label>
-          <input class="form-control on-field" type="time" name="on_time" required
-                 value="{{ edit.on_time if edit else '08:00' }}">
-          <div class="form-text">Si desactivas “Encendido”, no se guardarán estos campos.</div>
-        </div>
-
-        <!-- OFF -->
-        <div class="col-md-6">
-          <div class="fw-bold mb-2">Apagar</div>
-          <div class="d-flex flex-wrap gap-2 mb-2">
-            {% for d in ["L","M","X","J","V","S","D"] %}
-              <div class="form-check">
-                <input class="form-check-input off-field" type="checkbox" name="off_days" value="{{ d }}" id="off_{{ d }}"
-                       {% if not edit or (d in edit.off_days) %}checked{% endif %}>
-                <label class="form-check-label" for="off_{{ d }}">{{ d }}</label>
-              </div>
-            {% endfor %}
-          </div>
-          <label class="form-label">Hora</label>
-          <input class="form-control off-field" type="time" name="off_time" required
-                 value="{{ edit.off_time if edit else '20:30' }}">
-          <div class="form-text">Si desactivas “Apagado”, no se guardarán estos campos.</div>
-        </div>
-
-        <hr class="my-2">
-
-        <div class="col-md-6">
-          <label class="form-label">Apagado amable + fallback hard</label>
-          <div class="input-group">
-            <span class="input-group-text">Tras</span>
-            <input class="form-control" type="number" name="fallback_minutes" min="0" max="180"
-                   value="{{ edit.fallback_minutes if edit else 10 }}">
-            <span class="input-group-text">min</span>
-          </div>
-          <div class="form-text">0 = no esperar (solo ShutdownGuest / fallback inmediato si falla).</div>
-        </div>
-
-        <div class="col-md-6">
-          <label class="form-label">Estado</label>
-          <div class="form-check mt-2">
-            <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
-                   {% if not edit or edit.enabled %}checked{% endif %}>
-            <label class="form-check-label" for="enabled">Habilitada</label>
-          </div>
-        </div>
-
-        <div class="col-12 d-flex gap-2">
-          <button class="btn btn-primary" type="submit">Guardar</button>
-          {% if edit %}
-            <a class="btn btn-outline-primary" href="{{ url_for('schedule_page') }}">Cancelar edición</a>
-          {% endif %}
-          <a class="btn btn-outline-primary ms-auto" href="{{ url_for('home') }}">← Volver</a>
-        </div>
-      </form>
     </div>
-  </div>
 
-  <!-- LISTA DE REGLAS -->
-  <div class="col-12">
-    <div class="p-3 border rounded-3">
-      <div class="fw-bold mb-2">Reglas existentes</div>
-
-      <div class="table-responsive">
-        <table class="table portal-table align-middle">
-          <thead>
-            <tr>
-              <th style="width:60px">ID</th>
-              <th>Nombre</th>
-              <th style="width:110px">Estado</th>
-              <th style="width:230px">Encender</th>
-              <th style="width:230px">Apagar</th>
-              <th style="width:180px">Última ejecución</th>
-              <th style="width:200px">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-          {% for s in schedules %}
-            {% set has_on = (s.on_time and (s.on_days|length > 0)) %}
-            {% set has_off = (s.off_time and (s.off_days|length > 0)) %}
-            <tr>
-              <td class="text-contrast-70">{{ s.id }}</td>
-
-              <td class="fw-medium">
-                {{ s.name or ("Regla " ~ s.id) }}
-                <div class="small text-contrast-70">
-                  {% if s.scope == 'all' %}
-                    Todos ({{ prefix }})
-                  {% else %}
-                    {{ s.labs|length }} lab(s) seleccionado(s)
-                  {% endif %}
-                  · Fallback: {{ s.fallback_minutes }} min
+    <div class="row g-4">
+        <div class="col-xl-4 col-lg-5">
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white py-3">
+                    <h5 class="card-title mb-0 fw-bold">
+                        {{ '📝 Editar Regla' if edit else '➕ Nueva Regla Semanal' }}
+                    </h5>
                 </div>
-              </td>
+                <div class="card-body">
+                    <form id="scheduleForm" method="post" action="{{ url_for('schedule_save') }}">
+                        <input type="hidden" name="id" value="{{ edit.id if edit else '' }}">
+                        <input type="hidden" name="confirm_all" id="confirmAllHidden" value="">
 
-              <td>
-                {% if s.enabled %}
-                  <span class="badge text-bg-success">ON</span>
-                {% else %}
-                  <span class="badge text-bg-light border">OFF</span>
-                {% endif %}
-              </td>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Nombre de la regla</label>
+                            <input class="form-control" name="name" placeholder="Ej. Horario lectivo Mañana"
+                                   value="{{ edit.name if edit else '' }}" required>
+                        </div>
 
-              <td>
-                {% if has_on %}
-                  <span class="badge badge-portal">ON {{ s.on_time }}</span>
-                  <span class="small text-contrast-70">{{ s.on_days|join(',') }}</span>
-                {% else %}
-                  <span class="small text-contrast-70">—</span>
-                {% endif %}
-              </td>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Ámbito de aplicación (Scope)</label>
+                            <select class="form-select border-primary-subtle" name="scope" id="scopeSel">
+                                <option value="selected" {% if (not edit) or (edit and edit.scope=='selected') %}selected{% endif %}>
+                                    🎯 Seleccionar laboratorios específicos
+                                </option>
+                                <option value="all" {% if edit and edit.scope=='all' %}selected{% endif %}>
+                                    🌐 Todos los labs (Prefijo: {{ prefix }})
+                                </option>
+                            </select>
+                        </div>
 
-              <td>
-                {% if has_off %}
-                  <span class="badge text-bg-light border">OFF {{ s.off_time }}</span>
-                  <span class="small text-contrast-70">{{ s.off_days|join(',') }}</span>
-                {% else %}
-                  <span class="small text-contrast-70">—</span>
-                {% endif %}
-              </td>
+                        <div id="labsMultiWrap" class="mb-3" style="display:none;">
+                            <label class="form-label d-flex justify-content-between">
+                                <span>Seleccionar Labs:</span>
+                                <small class="text-primary">Ctrl + Click para varios</small>
+                            </label>
+                            <input type="text" id="labSearch" class="form-control form-control-sm mb-2" placeholder="Filtrar por nombre...">
+                            <select class="form-select" name="labs" id="labList" multiple size="8">
+                                {% for lab in labs %}
+                                <option value="{{ lab.name }}"
+                                    {% if edit and edit.scope=='selected' and (lab.name in edit.labs) %}selected{% endif %}>
+                                    {{ lab.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
 
-              <td class="small text-contrast-70">
-                <div>ON: <strong>{{ s.last_on_run or "—" }}</strong></div>
-                <div>OFF: <strong>{{ s.last_off_run or "—" }}</strong></div>
-              </td>
+                        <div id="scopeAllWarn" class="alert alert-warning d-flex align-items-center" style="display:none;">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                            <div>
+                                <strong>Cuidado:</strong> Se aplicará a todos los labs con prefijo <u>{{ prefix }}</u>.
+                            </div>
+                        </div>
 
-              <td>
-                {% set scope_icon = "🌐" if s.scope == "all" else "🎯" %}
-                <div class="btn-group">
-                  <button class="btn btn-sm {% if s.enabled %}btn-outline-success{% else %}btn-outline-secondary{% endif %} dropdown-toggle"
-                          type="button" data-bs-toggle="dropdown" aria-expanded="false"
-                          title="{% if s.scope=='all' %}Aplica a TODOS{% else %}Aplica a selección{% endif %}">
-                    {{ scope_icon }} Acciones
-                  </button>
+                        <hr class="my-4">
 
-                  <ul class="dropdown-menu dropdown-menu-end">
+                        <div class="row g-2 mb-4">
+                            <div class="col-6">
+                                <div class="form-check form-switch p-2 border rounded bg-light ps-5">
+                                    <input class="form-check-input mt-2" type="checkbox" id="enable_on" name="enable_on"
+                                           {% if not edit or ((edit.on_time|default('')) and (edit.on_days|default([]))) %}checked{% endif %}>
+                                    <label class="form-check-label fw-bold" for="enable_on text-success">ENCENDIDO</label>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="form-check form-switch p-2 border rounded bg-light ps-5">
+                                    <input class="form-check-input mt-2" type="checkbox" id="enable_off" name="enable_off"
+                                           {% if not edit or ((edit.off_time|default('')) and (edit.off_days|default([]))) %}checked{% endif %}>
+                                    <label class="form-check-label fw-bold" for="enable_off">APAGADO</label>
+                                </div>
+                            </div>
+                        </div>
 
-                    <li>
-                      <a class="dropdown-item" href="{{ url_for('schedule_page', edit=s.id) }}">Editar</a>
-                    </li>
+                        <div class="row">
+                            <div class="col-12 on-section mb-3">
+                                <div class="p-3 border-start border-success border-4 bg-success bg-opacity-10 rounded">
+                                    <h6 class="fw-bold text-success mb-3 text-uppercase small">Configuración Encendido</h6>
+                                    <div class="d-flex flex-wrap gap-2 mb-3">
+                                        {% for d in ["L","M","X","J","V","S","D"] %}
+                                        <input type="checkbox" class="btn-check on-field" name="on_days" value="{{ d }}" id="on_{{ d }}"
+                                               {% if not edit or (d in edit.on_days) %}checked{% endif %}>
+                                        <label class="btn btn-outline-success btn-sm" for="on_{{ d }}">{{ d }}</label>
+                                        {% endfor %}
+                                    </div>
+                                    <input class="form-control on-field" type="time" name="on_time" 
+                                           value="{{ edit.on_time if edit else '08:00' }}">
+                                </div>
+                            </div>
 
-                    <li>
-                      <form method="post" action="{{ url_for('schedule_toggle', sched_id=s.id) }}">
-                        <button class="dropdown-item" type="submit">
-                          {% if s.enabled %}Deshabilitar{% else %}Habilitar{% endif %}
-                        </button>
-                      </form>
-                    </li>
+                            <div class="col-12 off-section mb-3">
+                                <div class="p-3 border-start border-danger border-4 bg-danger bg-opacity-10 rounded">
+                                    <h6 class="fw-bold text-danger mb-3 text-uppercase small">Configuración Apagado</h6>
+                                    <div class="d-flex flex-wrap gap-2 mb-3">
+                                        {% for d in ["L","M","X","J","V","S","D"] %}
+                                        <input type="checkbox" class="btn-check off-field" name="off_days" value="{{ d }}" id="off_{{ d }}"
+                                               {% if not edit or (d in edit.off_days) %}checked{% endif %}>
+                                        <label class="btn btn-outline-danger btn-sm" for="off_{{ d }}">{{ d }}</label>
+                                        {% endfor %}
+                                    </div>
+                                    <div class="row g-2">
+                                        <div class="col-7">
+                                            <input class="form-control off-field" type="time" name="off_time" 
+                                                   value="{{ edit.off_time if edit else '20:30' }}">
+                                        </div>
+                                        <div class="col-5">
+                                            <div class="input-group">
+                                                <input class="form-control off-field" type="number" name="fallback_minutes" 
+                                                       value="{{ edit.fallback_minutes if edit else 10 }}" min="0" max="180">
+                                                <span class="input-group-text small">min</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="form-text mt-2 small">Minutos de espera antes del apagado forzado.</div>
+                                </div>
+                            </div>
+                        </div>
 
-                    <li><hr class="dropdown-divider"></li>
+                        <div class="form-check mb-4 mt-2">
+                            <input class="form-check-input" type="checkbox" name="enabled" id="enabled"
+                                   {% if not edit or edit.enabled %}checked{% endif %}>
+                            <label class="form-check-label fw-bold text-dark" for="enabled">Habilitar esta regla inmediatamente</label>
+                        </div>
 
-                    <li>
-                      <form method="post" action="{{ url_for('schedule_run_now', sched_id=s.id, action='on') }}"
-                            onsubmit="return confirm('¿Ejecutar ENCENDIDO ahora para esta regla?');">
-                        <button class="dropdown-item" type="submit" {% if not has_on %}disabled{% endif %}>
-                          Run ON
-                        </button>
-                      </form>
-                    </li>
-
-                    <li>
-                      <form method="post" action="{{ url_for('schedule_run_now', sched_id=s.id, action='off') }}"
-                            onsubmit="return confirm('¿Ejecutar APAGADO ahora para esta regla?');">
-                        <button class="dropdown-item" type="submit" {% if not has_off %}disabled{% endif %}>
-                          Run OFF
-                        </button>
-                      </form>
-                    </li>
-
-                    <li><hr class="dropdown-divider"></li>
-
-                    <li>
-                      <form method="post" action="{{ url_for('schedule_delete', sched_id=s.id) }}"
-                            onsubmit="return confirmDeleteSchedule(this);">
-                        <input type="hidden" name="confirm" value="">
-                        <button class="dropdown-item text-danger" type="submit">
-                          Eliminar
-                        </button>
-                      </form>
-                    </li>
-
-                  </ul>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-primary btn-lg" type="submit">
+                                <i class="bi bi-save me-1"></i> Guardar Programación
+                            </button>
+                            {% if edit %}
+                                <a class="btn btn-link text-decoration-none" href="{{ url_for('schedule_page') }}">Cancelar Edición</a>
+                            {% endif %}
+                        </div>
+                    </form>
                 </div>
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="7" class="text-muted">No hay reglas aún.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
+            </div>
+        </div>
 
-      <div class="d-flex justify-content-end gap-2 mt-2 flex-wrap">
-        <a class="btn btn-outline-danger" href="{{ url_for('lab_deletions_page') }}">
-          Programar borrado de laboratorio…
-        </a>
-        <button type="button" class="btn btn-outline-secondary" onclick="window.location.reload();">
-          Actualizar
-        </button>
-      </div>
-      <div class="form-text mt-2">
-        El borrado programado se gestiona en una página separada por seguridad.
-      </div>
+        <div class="col-xl-8 col-lg-7">
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0 fw-bold text-dark">Reglas Activas</h5>
+                    <a class="btn btn-sm btn-outline-danger" href="{{ url_for('lab_deletions_page') }}">
+                        ⚙️ Programar Borrados
+                    </a>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="bg-light">
+                                <tr>
+                                    <th class="ps-3" style="width: 50px">ID</th>
+                                    <th>Regla / Alcance</th>
+                                    <th>Programación</th>
+                                    <th class="text-center">Estado</th>
+                                    <th class="text-end pe-3">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for s in schedules %}
+                                {% set has_on = (s.on_time and (s.on_days|length > 0)) %}
+                                {% set has_off = (s.off_time and (s.off_days|length > 0)) %}
+                                <tr>
+                                    <td class="ps-3 text-muted small">{{ s.id }}</td>
+                                    <td>
+                                        <div class="fw-bold">{{ s.name or "Regla sin nombre" }}</div>
+                                        <div class="small text-muted">
+                                            {% if s.scope == 'all' %}
+                                                <span class="badge bg-dark-subtle text-dark border">🌐 Prefijo: {{ prefix }}</span>
+                                            {% else %}
+                                                <span class="badge bg-primary-subtle text-primary border">🎯 {{ s.labs|length }} labs</span>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="mb-1">
+                                            {% if has_on %}
+                                                <span class="badge bg-success shadow-sm">ON {{ s.on_time }}</span>
+                                                <small class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ s.on_days|join(' ') }}</small>
+                                            {% endif %}
+                                        </div>
+                                        <div>
+                                            {% if has_off %}
+                                                <span class="badge bg-secondary shadow-sm">OFF {{ s.off_time }}</span>
+                                                <small class="text-muted text-uppercase" style="font-size: 0.7rem;">{{ s.off_days|join(' ') }}</small>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                    <td class="text-center">
+                                        <form method="post" action="{{ url_for('schedule_toggle', sched_id=s.id) }}">
+                                            <button type="submit" class="btn border-0 p-0">
+                                                {% if s.enabled %}
+                                                    <span class="badge bg-success rounded-pill px-3">Activa</span>
+                                                {% else %}
+                                                    <span class="badge bg-light text-muted border rounded-pill px-3">Pausada</span>
+                                                {% endif %}
+                                            </button>
+                                        </form>
+                                    </td>
+                                    <td class="text-end pe-3">
+                                        <div class="dropdown">
+                                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                                                Acciones
+                                            </button>
+                                            <ul class="dropdown-menu dropdown-menu-end shadow border-0">
+                                                <li><a class="dropdown-item" href="{{ url_for('schedule_page', edit=s.id) }}">✏️ Editar</a></li>
+                                                <li><hr class="dropdown-divider"></li>
+                                                <li>
+                                                    <form method="post" action="{{ url_for('schedule_run_now', sched_id=s.id, action='on') }}" 
+                                                          onsubmit="return confirm('¿Ejecutar encendido ahora?');">
+                                                        <button class="dropdown-item" type="submit" {% if not has_on %}disabled{% endif %}>🚀 Run ON Now</button>
+                                                    </form>
+                                                </li>
+                                                <li>
+                                                    <form method="post" action="{{ url_for('schedule_run_now', sched_id=s.id, action='off') }}" 
+                                                          onsubmit="return confirm('¿Ejecutar apagado ahora?');">
+                                                        <button class="dropdown-item text-danger" type="submit" {% if not has_off %}disabled{% endif %}>🛑 Run OFF Now</button>
+                                                    </form>
+                                                </li>
+                                                <li><hr class="dropdown-divider"></li>
+                                                <li>
+                                                    <form method="post" action="{{ url_for('schedule_delete', sched_id=s.id) }}" onsubmit="return confirmDeleteSchedule(this);">
+                                                        <input type="hidden" name="confirm" value="">
+                                                        <button class="dropdown-item text-danger fw-bold" type="submit">🗑️ Eliminar</button>
+                                                    </form>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="5" class="text-center py-4 text-muted">No se han definido reglas de programación.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white py-3">
+                    <h5 class="card-title mb-0 fw-bold text-dark small text-uppercase">Historial Reciente</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-sm align-middle mb-0 small">
+                            <thead class="bg-light sticky-top">
+                                <tr>
+                                    <th class="ps-3">Fecha y Hora</th>
+                                    <th>ID</th>
+                                    <th>Acción</th>
+                                    <th>Resumen</th>
+                                    <th class="text-center">Resultado</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for r in runs %}
+                                <tr>
+                                    <td class="ps-3 text-muted">{{ r.run_at }}</td>
+                                    <td>Regla #{{ r.schedule_id }}</td>
+                                    <td>
+                                        <span class="badge {% if r.action == 'on' %}bg-success-subtle text-success{% else %}bg-secondary-subtle text-secondary{% endif %}">
+                                            {{ r.action|upper }}
+                                        </span>
+                                    </td>
+                                    <td class="text-truncate" style="max-width: 250px;">{{ r.summary }}</td>
+                                    <td class="text-center">
+                                        {% if r.ok %}
+                                            <i class="bi bi-check-circle-fill text-success"></i>
+                                        {% else %}
+                                            <i class="bi bi-x-circle-fill text-danger" title="Error"></i>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
-
-  <!-- RUNS -->
-  <div class="col-12">
-    <div class="p-3 border rounded-3">
-      <div class="fw-bold mb-2">Ejecuciones recientes</div>
-
-      <div class="table-responsive">
-        <table class="table portal-table align-middle">
-          <thead>
-            <tr>
-              <th style="width:170px">Fecha</th>
-              <th style="width:70px">ID</th>
-              <th style="width:80px">Acción</th>
-              <th>Resumen</th>
-              <th style="width:90px">OK</th>
-            </tr>
-          </thead>
-          <tbody>
-          {% for r in runs %}
-            <tr>
-              <td class="text-contrast-70">{{ r.run_at }}</td>
-              <td class="text-contrast-70">{{ r.schedule_id }}</td>
-              <td>
-                {% if r.action == 'on' %}
-                  <span class="badge badge-portal">ON</span>
-                {% else %}
-                  <span class="badge text-bg-light border">OFF</span>
-                {% endif %}
-              </td>
-              <td class="text-contrast-70">{{ r.summary }}</td>
-              <td>
-                {% if r.ok %}
-                  <span class="badge text-bg-success">OK</span>
-                {% else %}
-                  <span class="badge text-bg-danger">ERR</span>
-                {% endif %}
-              </td>
-            </tr>
-          {% else %}
-            <tr><td colspan="5" class="text-muted">Todavía no hay ejecuciones registradas.</td></tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
-      <div class="form-text">
-        El scheduler registra cada ejecución (aunque falle vCenter) para que puedas auditar.
-      </div>
-    </div>
-  </div>
-
 </div>
+
+<style>
+    .btn-check:checked + .btn-outline-success { background-color: #198754; color: white; box-shadow: 0 4px 6px rgba(25, 135, 84, 0.3); }
+    .btn-check:checked + .btn-outline-danger { background-color: #dc3545; color: white; box-shadow: 0 4px 6px rgba(220, 53, 69, 0.3); }
+    .on-section, .off-section { transition: opacity 0.3s ease; }
+    .card { border-radius: 12px; overflow: hidden; }
+    .portal-table th { font-weight: 600; text-transform: uppercase; font-size: 0.75rem; color: #6c757d; }
+</style>
 
 <script>
+  // Confirmación mejorada para eliminar
   function confirmDeleteSchedule(formEl){
-    const typed = prompt("⚠️ Eliminar regla: escribe SI para confirmar:", "");
-    if (typed === null) return false;
-    if (typed.trim().toUpperCase() !== "SI") {
-      alert("Confirmación incorrecta.");
-      return false;
+    const typed = prompt("⚠️ ¿Estás seguro de eliminar esta regla?\nEscribe SI para confirmar:", "");
+    if (typed?.trim().toUpperCase() === "SI") {
+      formEl.querySelector('input[name="confirm"]').value = "SI";
+      return true;
     }
-    formEl.querySelector('input[name="confirm"]').value = "SI";
-    return true;
+    return false;
   }
 
-  // Scope: mostrar labs, mostrar aviso ALL, y confirmar al guardar si ALL
   (function(){
     const sel = document.getElementById('scopeSel');
     const wrap = document.getElementById('labsMultiWrap');
     const warn = document.getElementById('scopeAllWarn');
     const form = document.getElementById('scheduleForm');
     const confirmHidden = document.getElementById('confirmAllHidden');
+    
+    // Buscador en la lista de laboratorios
+    const labSearch = document.getElementById('labSearch');
+    const labList = document.getElementById('labList');
 
     function applyScopeUI(){
       const isSelected = (sel.value === 'selected');
-      wrap.style.display = isSelected ? '' : 'none';
-      warn.style.display = isSelected ? 'none' : '';
+      wrap.style.display = isSelected ? 'block' : 'none';
+      warn.style.display = isSelected ? 'none' : 'block';
       if (sel.value !== 'all') confirmHidden.value = "";
     }
+
+    // Filtrado de labs
+    labSearch.addEventListener('input', function() {
+      const term = this.value.toLowerCase();
+      Array.from(labList.options).forEach(opt => {
+        opt.style.display = opt.text.toLowerCase().includes(term) ? '' : 'none';
+      });
+    });
 
     sel.addEventListener('change', applyScopeUI);
     applyScopeUI();
 
-    form.addEventListener('submit', function(e){
-      if (sel.value !== 'all') return;
-
-      const typed = prompt(
-        "⚠️ Esta regla se aplicará a TODOS los labs del prefijo {{ prefix }}.
-
-" +
-        "Para confirmar, escribe: TODOS",
-        ""
-      );
-
-      if (typed === null || typed.trim().toUpperCase() !== "TODOS") {
-        e.preventDefault();
-        alert("No se guardó la regla (confirmación incorrecta).");
-        confirmHidden.value = "";
-        return;
-      }
-
-      confirmHidden.value = "TODOS";
-    });
-  })();
-
-  // Activar/desactivar bloques ON/OFF
-  (function(){
+    // Gestión de visibilidad de secciones ON/OFF
     const onToggle = document.getElementById("enable_on");
     const offToggle = document.getElementById("enable_off");
 
-    function setGroupEnabled(selector, enabled){
-      document.querySelectorAll(selector).forEach(el => {
-        el.disabled = !enabled;
-      });
+    function setGroupEnabled(selector, enabled, sectionClass){
+      document.querySelectorAll(selector).forEach(el => el.disabled = !enabled);
+      document.querySelector(sectionClass).style.opacity = enabled ? "1" : "0.4";
+      document.querySelectorAll(selector).forEach(el => el.required = enabled && el.type === 'time');
     }
 
-    function apply(){
-      setGroupEnabled(".on-field", onToggle.checked);
-      setGroupEnabled(".off-field", offToggle.checked);
+    function updateVisibility(){
+      setGroupEnabled(".on-field", onToggle.checked, ".on-section");
+      setGroupEnabled(".off-field", offToggle.checked, ".off-section");
     }
 
-    onToggle.addEventListener("change", apply);
-    offToggle.addEventListener("change", apply);
-    apply();
+    onToggle.addEventListener("change", updateVisibility);
+    offToggle.addEventListener("change", updateVisibility);
+    updateVisibility();
+
+    // Confirmación para SCOPE ALL
+    form.addEventListener('submit', function(e){
+      if (sel.value !== 'all') return;
+      const typed = prompt("⚠️ ATENCIÓN: Esta regla afectará a TODOS los laboratorios con prefijo {{ prefix }}.\nEscribe TODOS para continuar:");
+      if (typed?.trim().toUpperCase() !== "TODOS") {
+        e.preventDefault();
+        alert("Operación cancelada.");
+      } else {
+        confirmHidden.value = "TODOS";
+      }
+    });
   })();
 </script>
-
 {% endblock %}

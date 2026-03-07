@@ -1,0 +1,158 @@
+{% extends "layout.html" %}
+{% block body %}
+
+<h2 class="fw-bold mb-2 text-primary">Mis plantillas</h2>
+<p class="text-contrast-70 mb-3">
+  Publica plantillas a partir de tu VM de profesor (ubicada en <strong>{{ teachers_folder }}</strong>).
+  Máximo <strong>{{ max_templates }}</strong> plantillas por laboratorio.
+</p>
+
+{% if active_vcenter_label %}
+<div class="alert alert-info shadow-sm">
+  vCenter activo: <strong>{{ active_vcenter_label }}</strong> · {{ active_vcenter_host }}
+</div>
+{% endif %}
+
+{% if not labs %}
+  <div class="alert alert-warning">No tienes laboratorios asignados.</div>
+  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
+{% else %}
+
+  <div class="table-responsive">
+    <table class="table portal-table align-middle">
+      <thead>
+        <tr>
+          <th>Lab</th>
+          <th style="width:240px">VM profesor</th>
+          <th style="width:120px">Cuota</th>
+          <th style="width:220px">Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for lab in labs %}
+        {% set st = vm_status.get(lab) %}
+        <tr>
+          <td class="fw-medium">{{ lab }}</td>
+          <td class="text-contrast-70">
+            {% if st and st.found %}
+              <span class="badge text-bg-success">Encontrada</span>
+              <div class="small mt-1">{{ st.vm_name }}</div>
+              <div class="small">Estado: <strong>{{ st.power }}</strong></div>
+            {% else %}
+              <span class="badge text-bg-danger">No encontrada</span>
+              <div class="small mt-1">Esperada: <code>{{ st.vm_name }}</code></div>
+            {% endif %}
+          </td>
+          <td>
+            {% set n = quota.get(lab, 0) %}
+            <span class="badge {% if n < max_templates %}text-bg-success{% else %}text-bg-danger{% endif %}">
+              {{ n }}/{{ max_templates }}
+            </span>
+          </td>
+          <td>
+            <form method="post" action="{{ url_for('my_templates_publish') }}"
+                  onsubmit="return confirmPublish('{{ lab|e }}');">
+              <input type="hidden" name="lab_name" value="{{ lab }}">
+              <input type="hidden" name="confirm1" value="">
+              <input type="hidden" name="confirm2" value="">
+              <button class="btn btn-primary btn-sm" type="submit"
+                      {% if not (st and st.found) or (quota.get(lab,0) >= max_templates) %}disabled{% endif %}>
+                Publicar plantilla
+              </button>
+            </form>
+          </td>
+        </tr>
+
+        <tr>
+          <td colspan="4" class="pt-0">
+            <div class="small text-contrast-70 mb-2">
+              Plantillas en <strong>{{ templates_root }}/{{ session.get('username') }}</strong> para este lab:
+            </div>
+
+            {% set tpls = templates_by_lab.get(lab, []) %}
+            {% if not tpls %}
+              <div class="text-muted small">— Sin plantillas —</div>
+            {% else %}
+              <div class="table-responsive">
+                <table class="table table-sm portal-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th style="width:180px">Creada</th>
+                      <th style="width:160px">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for t in tpls %}
+                      <tr>
+                        <td class="fw-medium">{{ t.name }}</td>
+                        <td class="text-contrast-70 small">{{ t.created_at }}</td>
+                        <td>
+                          <form method="post" action="{{ url_for('my_templates_delete') }}"
+                                onsubmit="return confirmDeleteTemplate('{{ t.name|e }}', this);">
+                            <input type="hidden" name="template_id" value="{{ t.id }}">
+                            <input type="hidden" name="confirm" value="">
+                            <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar</button>
+                          </form>
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
+
+{% endif %}
+
+<script>
+  function confirmPublish(labName) {
+    const msg1 =
+`⚠️ PUBLICAR PLANTILLA
+Se apagará tu VM de profesor y se clonará como TEMPLATE.
+
+Lab: ${labName}
+
+Escribe SI para continuar:`;
+    const typed1 = prompt(msg1, "");
+    if (typed1 === null || typed1.trim().toUpperCase() !== "SI") {
+      alert("Confirmación incorrecta.");
+      return false;
+    }
+
+    const msg2 =
+`Confirmación final:
+Escribe PUBLICAR para crear la plantilla:`;
+    const typed2 = prompt(msg2, "");
+    if (typed2 === null || typed2.trim().toUpperCase() !== "PUBLICAR") {
+      alert("Confirmación incorrecta.");
+      return false;
+    }
+
+    const form = event.target;
+    form.querySelector('input[name="confirm1"]').value = "SI";
+    form.querySelector('input[name="confirm2"]').value = "PUBLICAR";
+    return true;
+  }
+
+  function confirmDeleteTemplate(tplName, formEl) {
+    const msg =
+`⚠️ ELIMINAR PLANTILLA
+Se borrará del vCenter: ${tplName}
+
+Escribe SI para confirmar:`;
+    const typed = prompt(msg, "");
+    if (typed === null || typed.trim().toUpperCase() !== "SI") return false;
+    formEl.querySelector('input[name="confirm"]').value = "SI";
+    return true;
+  }
+</script>
+
+{% endblock %}

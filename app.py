@@ -10,6 +10,7 @@ import time
 import threading
 import sqlite3
 import json
+import re
 from contextlib import contextmanager
 from functools import wraps
 from queue import Queue, Empty
@@ -137,6 +138,13 @@ TMP_DIR = os.getenv("TMP_DIR", "/tmp/vclab_jobs")
 os.makedirs(TMP_DIR, exist_ok=True)
 
 LAB_FOLDER_PREFIX = os.getenv("LAB_FOLDER_PREFIX", "Lab - ")
+
+
+TEACHERS_FOLDER = os.getenv("TEACHERS_FOLDER", "Profesores")
+TEACHER_TEMPLATES_ROOT = os.getenv("TEMPLATES_PROF_ROOT", "Templates Profesores")
+TEACHER_TEMPLATE_PREFIX = os.getenv("TEACHER_TEMPLATE_PREFIX", "Plantilla")
+MAX_TEMPLATES_PER_LAB = _env_int("MAX_TEMPLATES_PER_LAB", 3)
+
 
 SOFT_SHUTDOWN_TIMEOUT_SEC = _env_int("SOFT_SHUTDOWN_TIMEOUT_SEC", 60)
 SOFT_SHUTDOWN_FALLBACK_HARD = _env_bool("SOFT_SHUTDOWN_FALLBACK_HARD", True)
@@ -337,6 +345,231 @@ def clear_user_labs(username: str):
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------------- Plantillas profesores (SQLite) ----------------
+
+def init_teacher_templates_db():
+    """Crea tabla de plantillas publicadas por profesores si no existe."""
+    conn = db_connect()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS teacher_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vcenter_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                lab_name TEXT NOT NULL,
+                template_name TEXT NOT NULL,
+                template_moid TEXT,
+                created_at TEXT NOT NULL,
+                created_by TEXT,
+                deleted_at TEXT,
+                deleted_by TEXT
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_user_lab ON teacher_templates(vcenter_id, username, lab_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_name ON teacher_templates(vcenter_id, template_name)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _tt_active_count(vcenter_id: str, username: str, lab_name: str) -> int:
+    conn = db_connect()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM teacher_templates WHERE vcenter_id=? AND username=? AND lab_name=? AND deleted_at IS NULL",
+            (vcenter_id, username, lab_name)
+        ).fetchone()
+        return int(row["n"]) if row else 0
+    finally:
+        conn.close()
+
+
+def _tt_list_for_user_lab(vcenter_id: str, username: str, lab_name: str):
+    conn = db_connect()
+    try:
+        return conn.execute(
+            """SELECT id, template_name, template_moid, created_at
+               FROM teacher_templates
+               WHERE vcenter_id=? AND username=? AND lab_name=? AND deleted_at IS NULL
+               ORDER BY created_at DESC, id DESC""",
+            (vcenter_id, username, lab_name)
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def _tt_list_all(vcenter_id: str):
+    conn = db_connect()
+    try:
+        return conn.execute(
+            """SELECT id, username, lab_name, template_name, template_moid, created_at
+               FROM teacher_templates
+               WHERE vcenter_id=? AND deleted_at IS NULL
+               ORDER BY created_at DESC, id DESC""",
+            (vcenter_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def _tt_get(vcenter_id: str, template_id: int):
+    conn = db_connect()
+    try:
+        return conn.execute(
+            "SELECT * FROM teacher_templates WHERE vcenter_id=? AND id=?",
+            (vcenter_id, template_id)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def _tt_insert(vcenter_id: str, username: str, lab_name: str, template_name: str, template_moid: str | None, created_by: str):
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO teacher_templates
+               (vcenter_id, username, lab_name, template_name, template_moid, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (vcenter_id, username, lab_name, template_name, template_moid, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), created_by)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _tt_mark_deleted(vcenter_id: str, template_id: int, deleted_by: str):
+    conn = db_connect()
+    try:
+        conn.execute(
+            "UPDATE teacher_templates SET deleted_at=?, deleted_by=? WHERE vcenter_id=? AND id=?",
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, vcenter_id, template_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _strip_lab_prefix(lab_name: str) -> str:
+    if lab_name.startswith(LAB_FOLDER_PREFIX):
+        return lab_name[len(LAB_FOLDER_PREFIX):].strip()
+    return lab_name.strip()
+
+
+def _sanitize_name(s: str) -> str:
+    s = re.sub(r"[\r\n\t]", " ", s).strip()
+    s = re.sub(r"\s+", " ", s)
+    return s[:80] if len(s) > 80 else s
+
+
+def _wait_task(task, timeout_sec: int = 1800):
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        st = getattr(getattr(task, "info", None), "state", None)
+        if st == vim.TaskInfo.State.success:
+            return True, None
+        if st == vim.TaskInfo.State.error:
+            err = getattr(task.info, "error", None)
+            msg = getattr(err, "msg", str(err)) if err else "unknown error"
+            return False, msg
+        time.sleep(1)
+    return False, "timeout"
+
+
+def _ensure_teacher_templates_folder(content, username: str):
+    datacenter = content.rootFolder.childEntity[0]
+    root = datacenter.vmFolder
+
+    top = find_folder_by_name(content, TEACHER_TEMPLATES_ROOT)
+    if not top:
+        top = root.CreateFolder(TEACHER_TEMPLATES_ROOT)
+        time.sleep(1)
+
+    sub = None
+    for child in getattr(top, "childEntity", []) or []:
+        if isinstance(child, vim.Folder) and getattr(child, "name", None) == username:
+            sub = child
+            break
+    if not sub:
+        sub = top.CreateFolder(username)
+        time.sleep(1)
+    return sub
+
+
+def _find_teacher_vm(content, lab_name: str, username: str):
+    vm_name = f"{lab_name}-{username}"
+    prof_folder = find_folder_by_name(content, TEACHERS_FOLDER)
+    if prof_folder:
+        view = content.viewManager.CreateContainerView(prof_folder, [vim.VirtualMachine], True)
+        try:
+            for vm in view.view:
+                try:
+                    if vm.name == vm_name and not (vm.config and vm.config.template):
+                        return vm
+                except Exception:
+                    continue
+        finally:
+            view.Destroy()
+
+    vm = get_obj_by_name(content, [vim.VirtualMachine], vm_name)
+    if vm:
+        try:
+            if vm.config and vm.config.template:
+                return None
+        except Exception:
+            pass
+    return vm
+
+
+def _soft_poweroff_vm(vm):
+    try:
+        if str(vm.runtime.powerState) == "poweredOff":
+            return True, "already off"
+    except Exception:
+        pass
+
+    try:
+        vm.ShutdownGuest()
+        ok = wait_for_power_state(vm, "poweredOff", SOFT_SHUTDOWN_TIMEOUT_SEC)
+        if ok:
+            return True, "ShutdownGuest ok"
+        if SOFT_SHUTDOWN_FALLBACK_HARD:
+            vm.PowerOffVM_Task()
+            return True, f"fallback PowerOff after {SOFT_SHUTDOWN_TIMEOUT_SEC}s"
+        return False, f"shutdown timeout {SOFT_SHUTDOWN_TIMEOUT_SEC}s"
+    except Exception as e:
+        if SOFT_SHUTDOWN_FALLBACK_HARD:
+            try:
+                vm.PowerOffVM_Task()
+                return True, f"fallback PowerOff after ShutdownGuest error: {e}"
+            except Exception as e2:
+                return False, f"ShutdownGuest error {e}; PowerOff error {e2}"
+        return False, f"ShutdownGuest error {e}"
+
+
+def _delete_template_in_vcenter(content, template_moid: str | None, template_name: str):
+    tmpl = None
+    if template_moid:
+        tmpl = find_vm_by_moid(content, template_moid)
+    if not tmpl:
+        tmpl = get_obj_by_name(content, [vim.VirtualMachine], template_name)
+    if not tmpl:
+        return False, "template not found"
+    try:
+        if not (tmpl.config and tmpl.config.template):
+            return False, "object is not a template"
+    except Exception:
+        pass
+
+    try:
+        t = tmpl.Destroy_Task()
+        ok, err = _wait_task(t, timeout_sec=1800)
+        return ok, err
+    except Exception as e:
+        return False, str(e)
+
+
 
 # ---------------- Auth / roles ----------------
 
@@ -649,17 +882,25 @@ def ensure_lab_access(lab_name: str) -> bool:
     return True
 
 def vm_is_in_lab(vm, lab_name: str) -> bool:
-    """True si la VM está dentro de la carpeta lab_name (o subcarpetas)."""
+    """True si la VM está dentro de la carpeta del lab O es la VM de profesor de ese lab."""
     try:
+        # 1. Comprobar jerarquía de carpetas
         cur = getattr(vm, "parent", None)
         while cur is not None:
-            if isinstance(cur, vim.Folder) and cur.name == lab_name:
-                return True
+            if isinstance(cur, vim.Folder):
+                # Caso A: Está en la carpeta normal del laboratorio
+                if cur.name == lab_name:
+                    return True
+                # Caso B: Está en la carpeta de PROFESORES y el nombre de la VM empieza por el nombre del lab
+                if cur.name == TEACHERS_FOLDER:
+                    # Verificamos que la VM pertenezca a este lab (ej: "Lab - MiLab-profe1")
+                    if vm.name.startswith(lab_name):
+                        return True
             cur = getattr(cur, "parent", None)
     except Exception:
         pass
     return False
-
+    
 def can_access_vm_without_lab(vm) -> bool:
     """
     Para endpoints que no reciben lab_name (ej: /api/vm/power),
@@ -1116,6 +1357,7 @@ def labs():
         labs_data.sort(key=lambda x: x["name"].lower())
         return render_template("labs.html", labs=labs_data, prefix=LAB_FOLDER_PREFIX, empty_message=empty_message)
 
+
 @app.route("/labs/<lab_name>")
 @login_required
 def lab_detail(lab_name):
@@ -1130,13 +1372,274 @@ def lab_detail(lab_name):
 
         vms = list_vms_in_folder(content, folder)
 
+        # --- NUEVO: Buscar VMs de los profesores para este lab ---
+        teacher_vms = []
+        prof_folder = find_folder_by_name(content, TEACHERS_FOLDER)
+        if prof_folder:
+            view = content.viewManager.CreateContainerView(prof_folder, [vim.VirtualMachine], True)
+            try:
+                for vm in view.view:
+                    try:
+                        if vm.config and vm.config.template:
+                            continue
+                    except Exception:
+                        pass
+                    
+                    # Filtramos por el nombre del lab (ej: "Lab1-profesorA")
+                    if vm.name.startswith(f"{lab_name}-"):
+                        # Si es profesor, solo ve su propia VM. Si es admin, ve todas las del lab.
+                        if session.get("role") != "admin" and vm.name != f"{lab_name}-{session.get('username')}":
+                            continue
+
+                        power = "unknown"
+                        try:
+                            power = str(vm.runtime.powerState)
+                        except Exception:
+                            pass
+
+                        has_snapshot, snapshot_count, latest_name, _ = get_snapshot_info(vm)
+
+                        teacher_vms.append({
+                            "name": vm.name,
+                            "moid": vm._moId,
+                            "power": power,
+                            "has_snapshot": has_snapshot,
+                            "snapshot_count": snapshot_count,
+                            "latest_snapshot_name": latest_name
+                        })
+            finally:
+                view.Destroy()
+
+        teacher_vms.sort(key=lambda x: x["name"].lower())
+
         return render_template(
             "lab_detail.html",
             lab_name=lab_name,
             vms=vms,
+            teacher_vms=teacher_vms, # <-- PASAMOS LA LISTA DE VMs
             vcenter_host=get_vcenter_cfg()[1]['host'],
             poll_interval_ms=POLL_INTERVAL_MS
         )
+
+# ---------------- Mis plantillas (Profesor) ----------------
+
+@app.get("/my-templates")
+@login_required
+@role_required("profesor")
+def my_templates():
+    username = session.get("username") or ""
+    vcid, _cfg = get_vcenter_cfg()
+
+    labs = list_user_labs(username)
+    labs.sort(key=lambda x: x.lower())
+
+    vm_status = {}
+    templates_by_lab = {}
+
+    with vcenter_ctx(vcid) as (_, content):
+        for lab_name in labs:
+            vm = _find_teacher_vm(content, lab_name, username)
+            if vm:
+                try:
+                    power = str(vm.runtime.powerState)
+                except Exception:
+                    power = "unknown"
+                vm_status[lab_name] = {"found": True, "moid": vm._moId, "power": power, "vm_name": vm.name}
+            else:
+                vm_status[lab_name] = {"found": False, "moid": None, "power": "unknown", "vm_name": f"{lab_name}-{username}"}
+
+            rows = _tt_list_for_user_lab(vcid, username, lab_name)
+            templates_by_lab[lab_name] = [
+                {"id": r["id"], "name": r["template_name"], "moid": r["template_moid"], "created_at": r["created_at"]}
+                for r in rows
+            ]
+
+    quota = {lab: _tt_active_count(vcid, username, lab) for lab in labs}
+
+    return render_template(
+        "my_templates.html",
+        labs=labs,
+        vm_status=vm_status,
+        templates_by_lab=templates_by_lab,
+        quota=quota,
+        max_templates=MAX_TEMPLATES_PER_LAB,
+        teachers_folder=TEACHERS_FOLDER,
+        templates_root=TEACHER_TEMPLATES_ROOT,
+    )
+
+
+@app.post("/my-templates/publish")
+@login_required
+@role_required("profesor")
+def my_templates_publish():
+    username = session.get("username") or ""
+    vcid, _cfg = get_vcenter_cfg()
+
+    lab_name = (request.form.get("lab_name") or "").strip()
+    confirm1 = (request.form.get("confirm1") or "").strip().upper()
+    confirm2 = (request.form.get("confirm2") or "").strip().upper()
+
+    if not lab_name or lab_name not in set(list_user_labs(username)):
+        flash("Lab inválido o no asignado.", "danger")
+        return redirect(url_for("my_templates"))
+
+    if confirm1 != "SI" or confirm2 != "PUBLICAR":
+        flash("Confirmación inválida para publicar plantilla.", "danger")
+        return redirect(url_for("my_templates"))
+
+    if _tt_active_count(vcid, username, lab_name) >= MAX_TEMPLATES_PER_LAB:
+        flash(f"Has alcanzado el máximo de {MAX_TEMPLATES_PER_LAB} plantillas para este lab.", "warning")
+        return redirect(url_for("my_templates"))
+
+    with vcenter_ctx(vcid) as (_, content):
+        vm = _find_teacher_vm(content, lab_name, username)
+        if not vm:
+            flash(f"No se encontró tu VM de profesor en '{TEACHERS_FOLDER}'. Esperada: {lab_name}-{username}", "danger")
+            return redirect(url_for("my_templates"))
+
+        ok, msg = _soft_poweroff_vm(vm)
+        if not ok:
+            flash(f"No se pudo apagar la VM antes de clonar: {msg}", "danger")
+            return redirect(url_for("my_templates"))
+
+        # Slot 1..MAX libre
+        existing = _tt_list_for_user_lab(vcid, username, lab_name)
+        used = set()
+        for r in existing:
+            m = re.search(r"-([1-9]\d*)$", r["template_name"] or "")
+            if m:
+                used.add(int(m.group(1)))
+        slot = None
+        for i in range(1, MAX_TEMPLATES_PER_LAB + 1):
+            if i not in used:
+                slot = i
+                break
+        if slot is None:
+            flash(f"Has alcanzado el máximo de {MAX_TEMPLATES_PER_LAB} plantillas para este lab.", "warning")
+            return redirect(url_for("my_templates"))
+
+        base = _sanitize_name(_strip_lab_prefix(lab_name))
+        tmpl_name = _sanitize_name(f"{TEACHER_TEMPLATE_PREFIX}-{base}-{username}-{slot}")
+
+        dest_folder = _ensure_teacher_templates_folder(content, username)
+
+        try:
+            relocate_spec = vim.vm.RelocateSpec()
+            spec = vim.vm.CloneSpec(location=relocate_spec, powerOn=False, template=True)
+            task = vm.Clone(folder=dest_folder, name=tmpl_name, spec=spec)
+            ok, err = _wait_task(task, timeout_sec=3600)
+            if not ok:
+                flash(f"Error clonando plantilla: {err}", "danger")
+                return redirect(url_for("my_templates"))
+            tmpl_obj = getattr(task.info, "result", None)
+            tmpl_moid = getattr(tmpl_obj, "_moId", None) if tmpl_obj else None
+        except Exception as e:
+            flash(f"Error clonando plantilla: {e}", "danger")
+            return redirect(url_for("my_templates"))
+
+    _tt_insert(vcid, username, lab_name, tmpl_name, tmpl_moid, created_by=username)
+    flash(f"Plantilla publicada: {tmpl_name}", "success")
+    return redirect(url_for("my_templates"))
+
+
+@app.post("/my-templates/delete")
+@login_required
+@role_required("profesor")
+def my_templates_delete():
+    username = session.get("username") or ""
+    vcid, _cfg = get_vcenter_cfg()
+
+    tid = (request.form.get("template_id") or "").strip()
+    confirm = (request.form.get("confirm") or "").strip().upper()
+
+    if not tid.isdigit():
+        flash("Plantilla inválida.", "danger")
+        return redirect(url_for("my_templates"))
+    if confirm != "SI":
+        flash("Confirmación inválida para eliminar plantilla.", "danger")
+        return redirect(url_for("my_templates"))
+
+    row = _tt_get(vcid, int(tid))
+    if not row or row["deleted_at"] is not None:
+        flash("Plantilla no encontrada.", "danger")
+        return redirect(url_for("my_templates"))
+    if row["username"] != username:
+        flash("No tienes permisos para eliminar esta plantilla.", "danger")
+        return redirect(url_for("my_templates"))
+
+    with vcenter_ctx(vcid) as (_, content):
+        ok, err = _delete_template_in_vcenter(content, row["template_moid"], row["template_name"])
+        if not ok:
+            flash(f"No se pudo eliminar la plantilla en vCenter: {err}", "danger")
+            return redirect(url_for("my_templates"))
+
+    _tt_mark_deleted(vcid, int(tid), deleted_by=username)
+    flash("Plantilla eliminada.", "warning")
+    return redirect(url_for("my_templates"))
+
+
+# ---------------- Plantillas profesores (Admin) ----------------
+
+@app.get("/admin/teacher-templates")
+@login_required
+@role_required("admin")
+def teacher_templates_admin():
+    vcid, _cfg = get_vcenter_cfg()
+    rows = _tt_list_all(vcid)
+    items = [
+        {
+            "id": r["id"],
+            "username": r["username"],
+            "lab_name": r["lab_name"],
+            "template_name": r["template_name"],
+            "template_moid": r["template_moid"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+    return render_template("teacher_templates_admin.html", items=items)
+
+
+@app.post("/admin/teacher-templates/delete")
+@login_required
+@role_required("admin")
+def teacher_templates_admin_delete():
+    vcid, _cfg = get_vcenter_cfg()
+    ids = request.form.getlist("template_ids")
+    confirm = (request.form.get("confirm") or "").strip().upper()
+
+    if confirm != "SI":
+        flash("Confirmación inválida para eliminar plantillas.", "danger")
+        return redirect(url_for("teacher_templates_admin"))
+    if not ids:
+        flash("No seleccionaste ninguna plantilla.", "warning")
+        return redirect(url_for("teacher_templates_admin"))
+
+    deleted = 0
+    errors = 0
+
+    with vcenter_ctx(vcid) as (_, content):
+        for sid in ids:
+            if not (sid or "").isdigit():
+                continue
+            row = _tt_get(vcid, int(sid))
+            if not row or row["deleted_at"] is not None:
+                continue
+
+            ok, err = _delete_template_in_vcenter(content, row["template_moid"], row["template_name"])
+            if ok:
+                _tt_mark_deleted(vcid, int(sid), deleted_by=session.get("username") or "admin")
+                deleted += 1
+            else:
+                errors += 1
+
+    if deleted:
+        flash(f"Plantillas eliminadas: {deleted}.", "warning")
+    if errors:
+        flash(f"No se pudieron eliminar {errors} plantilla(s). Revisa si existen/bloqueos en vCenter.", "danger")
+
+    return redirect(url_for("teacher_templates_admin"))
+
 
 # -------- API power+snapshot --------
 @app.get("/api/vm/power")
@@ -2588,9 +3091,14 @@ def _upsert_schedule(form, username: str):
 
     on_days = form.getlist("on_days") if enable_on else []
     off_days = form.getlist("off_days") if enable_off else []
-    on_time = (form.get("on_time") or "").strip() if enable_on else ""
-    off_time = (form.get("off_time") or "").strip() if enable_off else ""
+    
+def _norm_hhmm(t: str) -> str:
+    t = (t or "").strip()
+    # Acepta HH:MM o HH:MM:SS -> guarda HH:MM
+    return t[:5] if len(t) >= 5 else t
 
+    on_time = _norm_hhmm(form.get("on_time")) if enable_on else ""
+    off_time = _norm_hhmm(form.get("off_time")) if enable_off else ""
     fallback_minutes = int(form.get("fallback_minutes") or "10")
 
     labs = form.getlist("labs")
@@ -3032,6 +3540,7 @@ def schedule_run_now(sched_id, action):
 
 init_user_db()
 init_schedule_db()
+init_teacher_templates_db()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("FLASK_PORT", "5000")), debug=False)

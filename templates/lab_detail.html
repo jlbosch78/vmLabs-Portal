@@ -3,6 +3,7 @@
 <h2 class="fw-bold mb-2 text-primary">Laboratorio: {{ lab_name }}</h2>
 <p class="text-contrast-70 mb-3">Estado, VMRC y acciones (actualización manual).</p>
 
+
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
   <form method="post" action="{{ url_for('lab_power_on') }}"
         onsubmit="return confirm('¿Encender TODAS las VMs del lab {{ lab_name }}?');">
@@ -31,11 +32,10 @@
     </form>
   {% endif %}
 
-  <!-- Filtro VMs -->
   <div class="d-flex align-items-center gap-2 ms-auto">
     <input id="vmFilterInput" class="form-control form-control-sm"
            style="max-width:260px"
-           type="text" placeholder="Filtrar VM… (nombre)"
+           type="text" placeholder="Filtrar VM... (nombre)"
            autocomplete="off">
 
     <select id="powerFilter" class="form-select form-select-sm" style="max-width:160px">
@@ -97,6 +97,194 @@
   }
 </style>
 
+{# VMs DE LOS PROFESORES #}
+<div class="mb-3">
+  <div class="d-flex align-items-center justify-content-between">
+    <h5 class="mb-2">VM del profesor</h5>
+    <div class="d-flex gap-2">
+      {% if session.get('role') == 'profesor' %}
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('my_templates') }}">Mis plantillas</a>
+      {% endif %}
+      {% if session.get('role') == 'admin' %}
+        <a class="btn btn-outline-primary btn-sm" href="{{ url_for('teacher_templates_admin') }}">Plantillas profesores</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if teacher_vms %}
+    <div class="table-responsive">
+      <table class="table align-middle portal-table">
+        <thead>
+          <tr>
+            <th>Estado</th>
+            <th>VM</th>
+            <th style="width:720px">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for tvm in teacher_vms %}
+          <tr data-moid="{{ tvm.moid }}" data-vmname="{{ tvm.name|e }}" data-scope="teacher">
+            <td style="width:180px">
+              <span class="pwr-dot {{ 'pwr-on' if tvm.power=='poweredOn' else ('pwr-off' if tvm.power=='poweredOff' else 'pwr-unk') }}"></span>
+              <span class="fw-medium pwr-text">
+                {% if tvm.power == "poweredOn" %}ON{% elif tvm.power == "poweredOff" %}OFF{% elif tvm.power == "suspended" %}SUSP{% else %}?{% endif %}
+              </span>
+              <span class="ms-2 snap-badge" title="Snapshots">
+                *** <span class="snap-count">{{ tvm.snapshot_count or 0 }}</span>
+              </span>
+            </td>
+
+            <td class="fw-medium">{{ tvm.name }}</td>
+
+            <td class="actions" data-power="{{ tvm.power|e }}">
+              <div class="vm-actions-wrap">
+
+                <div class="btn-group">
+                  <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
+                          data-bs-toggle="dropdown" aria-expanded="false">
+                    Energía
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li>
+                      {% if tvm.power == "poweredOn" %}
+                        <button class="dropdown-item disabled js-action-on" type="button">Encender</button>
+                      {% else %}
+                        <form method="post" action="{{ url_for('vm_power_on') }}">
+                          <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                          <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                          <button class="dropdown-item js-action-on" type="submit">
+                            {% if tvm.power == "suspended" %}Reanudar{% else %}Encender{% endif %}
+                          </button>
+                        </form>
+                      {% endif %}
+                    </li>
+                    <li>
+                      {% if tvm.power == "poweredOff" %}
+                        <button class="dropdown-item disabled js-action-off" type="button">Apagar</button>
+                      {% else %}
+                        <form method="post" action="{{ url_for('vm_power_off') }}"
+                              onsubmit="return confirm('¿Apagar la VM {{ tvm.name }} (apagado amable)?');">
+                          <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                          <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                          <button class="dropdown-item js-action-off" type="submit">Apagar</button>
+                        </form>
+                      {% endif %}
+                    </li>
+                    <li>
+                      {% if tvm.power != "poweredOn" %}
+                        <button class="dropdown-item disabled js-action-reboot" type="button">Reiniciar</button>
+                      {% else %}
+                        <form method="post" action="{{ url_for('vm_power_reboot') }}"
+                              onsubmit="return confirm('Â¿Reiniciar la VM {{ tvm.name }} (amable)?');">
+                          <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                          <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                          <button class="dropdown-item js-action-reboot" type="submit">Reiniciar</button>
+                        </form>
+                      {% endif %}
+                    </li>
+                  </ul>
+                </div>
+
+                <div class="btn-group">
+                  <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
+                          data-bs-toggle="dropdown" aria-expanded="false">
+                    Snapshot
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li>
+                      <form method="post" action="{{ url_for('vm_snapshot_create') }}"
+                            onsubmit="return confirm('¿Crear snapshot de la VM {{ tvm.name }}?');">
+                        <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                        <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                        <button class="dropdown-item js-snap-create" type="submit">Crear snapshot</button>
+                      </form>
+                    </li>
+                    <li>
+                      {% if tvm.snapshot_count and tvm.snapshot_count > 0 %}
+                        <form method="post" action="{{ url_for('vm_snapshot_delete_last') }}"
+                              onsubmit="return confirmDeleteSnapshot('{{ tvm.name|e }}', this);">
+                          <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                          <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                          <input type="hidden" name="confirm" value="">
+                          <button class="dropdown-item js-snap-delete" type="submit">Eliminar snapshot</button>
+                        </form>
+                      {% else %}
+                        <button class="dropdown-item disabled js-snap-delete" type="button">
+                          Eliminar snapshot <small>(sin snapshots)</small>
+                        </button>
+                      {% endif %}
+                    </li>
+                  </ul>
+                </div>
+
+                <div class="btn-group">
+                  <button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button"
+                          data-bs-toggle="dropdown" aria-expanded="false">
+                    Máquina Virtual
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li>
+                      <a class="dropdown-item" href="vmrc://{{ vcenter_host }}/?moid={{ tvm.moid }}">
+                        Ver consola (VMRC)
+                      </a>
+                    </li>
+                    <li>
+                      <a class="dropdown-item" href="https://{{ vcenter_host }}/ui" target="_blank" rel="noopener">
+                        Abrir vCenter
+                      </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                      {% if tvm.has_snapshot %}
+                        <form method="post" action="{{ url_for('vm_recreate') }}"
+                              onsubmit="return confirmRecreate('{{ tvm.name|e }}', this);">
+                          <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                          <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                          <input type="hidden" name="confirm" value="">
+                          <button class="dropdown-item js-recreate" type="submit">Recrear MV</button>
+                        </form>
+                      {% else %}
+                        <button class="dropdown-item disabled js-recreate" type="button">
+                          Recrear MV <small>(sin snapshots)</small>
+                        </button>
+                      {% endif %}
+                    </li>
+                    <li>
+                      <form method="post" action="{{ url_for('vm_delete') }}"
+                            onsubmit="return confirmDeleteVM('{{ tvm.name|e }}', this);">
+                        <input type="hidden" name="moid" value="{{ tvm.moid }}">
+                        <input type="hidden" name="lab_name" value="{{ lab_name }}">
+                        <input type="hidden" name="confirm" value="">
+                        <button class="dropdown-item text-danger" type="submit">
+                          Eliminar MV
+                        </button>
+                      </form>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="alert alert-warning mb-0">
+      No se han encontrado VMs de profesor(es) para este lab.
+      <div class="small text-contrast-70 mt-1">
+        {% if session.get('role') == 'profesor' %}
+          Nombre esperado: <code>{{ lab_name }}-{{ session.get('username') }}</code> dentro de la carpeta <code>Profesores</code>.
+        {% else %}
+          Busca VMs con prefijo: <code>{{ lab_name }}-</code> dentro de la carpeta <code>Profesores</code>.
+        {% endif %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+{# VMs DEL LAB #}
+<h5 class="mb-2">VMs del laboratorio</h5>
 <div class="table-responsive">
   <table class="table align-middle portal-table">
     <thead>
@@ -106,31 +294,27 @@
         <th style="width:720px">Acciones</th>
       </tr>
     </thead>
-    <tbody>
+    <tbody id="labVmTbody">
     {% for vm in vms %}
       <tr
         data-moid="{{ vm.moid }}"
         data-vmname="{{ vm.name|e }}"
         data-has-snapshot="{{ '1' if vm.has_snapshot else '0' }}"
         data-snapshot-count="{{ vm.snapshot_count if vm.snapshot_count is defined else (1 if vm.has_snapshot else 0) }}"
+        data-scope="lab"
       >
         <td style="width:180px">
           <span class="pwr-dot {{ 'pwr-on' if vm.power=='poweredOn' else ('pwr-off' if vm.power=='poweredOff' else 'pwr-unk') }}"></span>
           <span class="fw-medium pwr-text">
             {% if vm.power == "poweredOn" %}ON{% elif vm.power == "poweredOff" %}OFF{% elif vm.power == "suspended" %}SUSP{% else %}?{% endif %}
           </span>
-
           <span class="ms-2 snap-badge snap-badge-el" title="Snapshots">
-            🧷 <span class="snap-count">{{ vm.snapshot_count if vm.snapshot_count is defined else (1 if vm.has_snapshot else 0) }}</span>
+            *** <span class="snap-count">{{ vm.snapshot_count if vm.snapshot_count is defined else (1 if vm.has_snapshot else 0) }}</span>
           </span>
         </td>
-
         <td class="fw-medium">{{ vm.name }}</td>
-
         <td class="actions" data-power="{{ vm.power|e }}">
           <div class="vm-actions-wrap">
-
-            <!-- Energía -->
             <div class="btn-group">
               <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button"
                       data-bs-toggle="dropdown" aria-expanded="false">
@@ -150,20 +334,18 @@
                     </form>
                   {% endif %}
                 </li>
-
                 <li>
                   {% if vm.power == "poweredOff" %}
                     <button class="dropdown-item disabled js-action-off" type="button">Apagar</button>
                   {% else %}
                     <form method="post" action="{{ url_for('vm_power_off') }}"
-                          onsubmit="return confirm('¿Apagar la VM {{ vm.name }} (apagado amable)?');">
+                          onsubmit="return confirm('Â¿Apagar la VM {{ vm.name }} (apagado amable)?');">
                       <input type="hidden" name="moid" value="{{ vm.moid }}">
                       <input type="hidden" name="lab_name" value="{{ lab_name }}">
                       <button class="dropdown-item js-action-off" type="submit">Apagar</button>
                     </form>
                   {% endif %}
                 </li>
-
                 <li>
                   {% if vm.power != "poweredOn" %}
                     <button class="dropdown-item disabled js-action-reboot" type="button">Reiniciar</button>
@@ -179,7 +361,6 @@
               </ul>
             </div>
 
-            <!-- Snapshot -->
             <div class="btn-group">
               <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button"
                       data-bs-toggle="dropdown" aria-expanded="false">
@@ -194,7 +375,6 @@
                     <button class="dropdown-item js-snap-create" type="submit">Crear snapshot</button>
                   </form>
                 </li>
-
                 <li>
                   {% if vm.snapshot_count and vm.snapshot_count > 0 %}
                     <form method="post" action="{{ url_for('vm_snapshot_delete_last') }}"
@@ -213,7 +393,6 @@
               </ul>
             </div>
 
-            <!-- Máquina Virtual -->
             <div class="btn-group">
               <button class="btn btn-outline-dark btn-sm dropdown-toggle" type="button"
                       data-bs-toggle="dropdown" aria-expanded="false">
@@ -230,9 +409,7 @@
                     Abrir vCenter
                   </a>
                 </li>
-
                 <li><hr class="dropdown-divider"></li>
-
                 <li>
                   {% if vm.has_snapshot %}
                     <form method="post" action="{{ url_for('vm_recreate') }}"
@@ -248,7 +425,6 @@
                     </button>
                   {% endif %}
                 </li>
-
                 <li>
                   <form method="post" action="{{ url_for('vm_delete') }}"
                         onsubmit="return confirmDeleteVM('{{ vm.name|e }}', this);">
@@ -262,7 +438,6 @@
                 </li>
               </ul>
             </div>
-
           </div>
         </td>
       </tr>
@@ -276,14 +451,14 @@
 <script>
   function confirmRecreate(vmName, formEl) {
     const msg =
-`⚠️ RECREAR VM: acción destructiva (revierte al snapshot baseline).
+` RECREAR VM: acción destructiva (revierte al snapshot baseline).
 Se perderán cambios desde el baseline.
 
 Escribe SI para confirmar:`;
     const typed = prompt(msg, "");
     if (typed === null) return false;
     if (typed.trim().toUpperCase() !== "SI") {
-      alert("Confirmación incorrecta. No se recreó la VM.");
+      alert("Confirmación incorrecta. No se recrea la VM.");
       return false;
     }
     const hidden = formEl.querySelector('input[name="confirm"]');
@@ -293,14 +468,14 @@ Escribe SI para confirmar:`;
 
   function confirmDeleteSnapshot(vmName, formEl) {
     const msg =
-`⚠️ ELIMINAR SNAPSHOT (último): acción destructiva.
-Si hay varios snapshots, se eliminará SOLO el más reciente (último por fecha).
+` ELIMINAR SNAPSHOT (Último): acción destructiva.
+Si hay varios snapshots, se eliminará SOLO el más reciente.
 
 Escribe SI para confirmar:`;
     const typed = prompt(msg, "");
     if (typed === null) return false;
     if (typed.trim().toUpperCase() !== "SI") {
-      alert("Confirmación incorrecta. No se eliminó el snapshot.");
+      alert("Confirmación incorrecta. No se elimina el snapshot.");
       return false;
     }
     const hidden = formEl.querySelector('input[name="confirm"]');
@@ -310,14 +485,14 @@ Escribe SI para confirmar:`;
 
   function confirmDeleteVM(vmName, formEl) {
     const msg =
-`⚠️ ELIMINAR VM: acción irreversible.
+`â ELIMINAR VM: acción irreversible.
 Se borrará la máquina '${vmName}' y todos sus discos.
 
 Escribe SI para confirmar:`;
     const typed = prompt(msg, "");
     if (typed === null) return false;
     if (typed.trim().toUpperCase() !== "SI") {
-      alert("Confirmación incorrecta. No se eliminó la VM.");
+      alert("Confirmación incorrecta. No se elimina la VM.");
       return false;
     }
     const hidden = formEl.querySelector('input[name="confirm"]');
@@ -332,35 +507,27 @@ Escribe SI para confirmar:`;
 
     form.addEventListener("submit", function(e) {
       e.preventDefault();
-
       const msg =
-`⚠️ ELIMINAR LAB: acción irreversible.
+` ELIMINAR LAB: acción irreversible.
 Se eliminarán snapshots, VMs y discos.
 
 Para confirmar, escribe EXACTAMENTE:
 ${expected}`;
-
       const typed = prompt(msg, "");
       if (typed === null) return;
       if (typed.trim() !== expected) {
-        alert("Confirmación incorrecta. No se eliminó el lab.");
+        alert("Confirmación incorrecta. No se elimina el lab.");
         return;
       }
-
-      const ok = confirm("Último aviso: ¿Seguro que quieres ELIMINARLO?");
+      const ok = confirm("Útimo aviso: ¿Seguro que quieres ELIMINARLO?");
       if (!ok) return;
-
       form.submit();
     });
   })();
 
-  const LAB_NAME = {{ lab_name|tojson }};
-  const VCENTER_HOST = {{ vcenter_host|tojson }};
-
   function dotClass(power) {
     if (power === "poweredOn") return "pwr-dot pwr-on";
     if (power === "poweredOff") return "pwr-dot pwr-off";
-    if (power === "suspended") return "pwr-dot pwr-unk";
     return "pwr-dot pwr-unk";
   }
   function label(power) {
@@ -372,12 +539,7 @@ ${expected}`;
 
   function setDisabled(el, disabled) {
     if (!el) return;
-
-    // Para botones reales, usar disabled nativo
-    if (el.tagName === "BUTTON") {
-      el.disabled = !!disabled;
-    }
-
+    if (el.tagName === "BUTTON") el.disabled = !!disabled;
     if (disabled) {
       el.classList.add("disabled");
       el.setAttribute("aria-disabled", "true");
@@ -391,26 +553,17 @@ ${expected}`;
 
   function applyRowState(row, data) {
     const power = data.power;
-
-    // dataset
-    row.dataset.hasSnapshot = data.has_snapshot ? "1" : "0";
-    row.dataset.snapshotCount = String(parseInt(data.snapshot_count || "0", 10));
-
-    // dot + label
     const dot = row.querySelector(".pwr-dot");
     const txt = row.querySelector(".pwr-text");
     if (dot) dot.className = dotClass(power);
     if (txt) txt.textContent = label(power);
 
-    // snapshot badge
     const snapCountEl = row.querySelector(".snap-count");
     if (snapCountEl) snapCountEl.textContent = String(parseInt(data.snapshot_count || "0", 10));
 
-    // IMPORTANT: actualizar data-power para que el filtro por estado sea correcto
     const actionsTd = row.querySelector("td.actions");
     if (actionsTd) actionsTd.setAttribute("data-power", power);
 
-    // enable/disable actions according to new state
     const canOn = (power !== "poweredOn");
     const canOff = (power !== "poweredOff");
     const canReboot = (power === "poweredOn");
@@ -418,15 +571,10 @@ ${expected}`;
     const canDeleteSnap = snapCount > 0;
     const canRecreate = snapCount > 0;
 
-    // Energy
     row.querySelectorAll(".js-action-on").forEach(el => setDisabled(el, !canOn));
     row.querySelectorAll(".js-action-off").forEach(el => setDisabled(el, !canOff));
     row.querySelectorAll(".js-action-reboot").forEach(el => setDisabled(el, !canReboot));
-
-    // Snapshot
     row.querySelectorAll(".js-snap-delete").forEach(el => setDisabled(el, !canDeleteSnap));
-
-    // Recreate
     row.querySelectorAll(".js-recreate").forEach(el => setDisabled(el, !canRecreate));
   }
 
@@ -436,24 +584,16 @@ ${expected}`;
     return data;
   }
 
-  // --- Filtro de VMs (nombre + estado) ---
   function applyVmFilter() {
     const q = (document.getElementById("vmFilterInput")?.value || "").trim().toLowerCase();
     const p = (document.getElementById("powerFilter")?.value || "all").trim();
-
-    const rows = document.querySelectorAll("tr[data-moid]");
+    const rows = document.querySelectorAll("#labVmTbody tr[data-moid]");
     for (const row of rows) {
       const name = (row.getAttribute("data-vmname") || "").toLowerCase();
-
-      const actionsTd = row.querySelector("td.actions");
-      let power = (actionsTd?.getAttribute("data-power") || "").trim();
-      if (!power) power = "unknown";
-
+      const power = (row.querySelector("td.actions")?.getAttribute("data-power") || "unknown").trim();
       const normPower = (power === "poweredOn" || power === "poweredOff" || power === "suspended") ? power : "unknown";
-
       const matchName = !q || name.includes(q);
       const matchPower = (p === "all") || (normPower === p);
-
       row.style.display = (matchName && matchPower) ? "" : "none";
     }
   }
@@ -473,36 +613,26 @@ ${expected}`;
     const prev = btn.innerHTML;
     btn.disabled = true;
     btn.innerHTML = '<span class="mini-spin"></span>Actualizando...';
-
     const rows = Array.from(document.querySelectorAll("tr[data-moid]"));
-    const concurrency = 8; // límite para no saturar el servidor
+    const concurrency = 8;
     let idx = 0;
-
     async function worker() {
       while (idx < rows.length) {
-        const myIdx = idx++;
-        const row = rows[myIdx];
+        const row = rows[idx++];
         const moid = row.getAttribute("data-moid");
         try {
           const data = await fetchPower(moid);
           if (data && data.ok) applyRowState(row, data);
-        } catch (e) { /* silencioso */ }
+        } catch (e) {}
       }
     }
-
-    const workers = Array.from({ length: Math.min(concurrency, rows.length) }, () => worker());
-    await Promise.all(workers);
-
-    // Reaplica filtro tras actualizar estados
+    await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, () => worker()));
     applyVmFilter();
-
     btn.innerHTML = prev;
     btn.disabled = false;
   }
 
   document.getElementById("refreshStatesBtn").addEventListener("click", refreshAllStates);
-
-  // Aplica filtro al cargar (por si hay valores precargados)
   applyVmFilter();
 </script>
 {% endblock %}
