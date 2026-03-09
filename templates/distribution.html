@@ -1,99 +1,218 @@
 {% extends "layout.html" %}
 {% block body %}
-<h2 class="fw-bold mb-2 text-primary">Paso 2 · Distribuir {{ total }} VM(s) por host</h2>
-<p class="text-contrast-70 mb-4">Ajusta las cantidades por host. La suma debe coincidir con el total.</p>
 
-<form method="post" action="{{ url_for('confirm_job_with_distribution') }}">
-  <input type="hidden" name="template" value="{{ template }}">
-  <input type="hidden" name="folder" value="{{ folder }}">
-  <input type="hidden" name="datastore" value="{{ datastore }}">
-  <input type="hidden" name="network" value="{{ network }}">
-  <input type="hidden" name="csv_path" value="{{ csv_path }}">
-
-  <div class="table-responsive mb-2">
-    <table class="table align-middle portal-table">
-      <thead>
-        <tr><th>Host</th><th style="width:200px">VMs asignadas</th></tr>
-      </thead>
-      <tbody>
-        {% for h, val in initial.items() %}
-        <tr>
-          <td class="fw-medium">{{ h }}</td>
-          <td>
-            <input type="number" class="form-control host-count" min="0" step="1"
-                   name="host_{{ loop.index0 }}" value="{{ val }}" data-host="{{ h }}">
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <input type="hidden" name="host_names" value="{{ '|'.join(hosts) }}">
-  <input type="hidden" name="make_teacher" value="{{ 'on' if make_teacher else '' }}">
-  <input type="hidden" name="teacher_user" value="{{ teacher_user }}">
-
-  <p class="mb-3">Total asignado:
-    <span id="sum" class="badge rounded-pill text-bg-success">0</span>
-    / <span class="fw-bold">{{ total }}</span>
-  </p>
-
-  {% if make_teacher and teacher_user %}
-    <div class="alert alert-info">
-      Se creará una VM para el profesor: <strong>{{ folder }}-{{ teacher_user }}</strong> en la carpeta <strong>Profesores</strong>.
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-end mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-1">
+                <i class="bi bi-cpu me-2"></i>Paso 2: Distribución de Carga
+            </h2>
+            <p class="text-muted mb-0">Reparte las <strong>{{ total }}</strong> máquinas virtuales entre los hosts disponibles del clúster.</p>
+        </div>
+        <div class="text-end d-none d-md-block">
+            <span class="badge bg-primary rounded-pill px-3">Paso 2 de 2</span>
+        </div>
     </div>
-    <div class="mb-3">
-      <label class="form-label">Host para la VM del profesor</label>
-      <select name="teacher_host" class="form-select">
-        {% for h in hosts %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
-      </select>
-    </div>
-    <hr class="my-3">
-  {% endif %}
 
-  <div class="form-check mb-2">
-    <input class="form-check-input" type="checkbox" name="power_on" id="power_on">
-    <label class="form-check-label" for="power_on">
-      Encender las VMs luego de crearlas
-    </label>
-  </div>
+    <form method="post" action="{{ url_for('confirm_job_with_distribution') }}">
+        <input type="hidden" name="template" value="{{ template }}">
+        <input type="hidden" name="folder" value="{{ folder }}">
+        <input type="hidden" name="datastore" value="{{ datastore }}">
+        <input type="hidden" name="network" value="{{ network }}">
+        <input type="hidden" name="csv_path" value="{{ csv_path }}">
+        <input type="hidden" name="host_names" value="{{ '|'.join(hosts) }}">
+        <input type="hidden" name="make_teacher" value="{{ 'on' if make_teacher else '' }}">
+        <input type="hidden" name="teacher_user" value="{{ teacher_user }}">
 
-  <div class="form-check mb-3">
-    <input class="form-check-input" type="checkbox" name="make_snapshot" id="make_snapshot">
-    <label class="form-check-label" for="make_snapshot">
-      Crear instantánea inicial tras el clonado (baseline)
-    </label>
-  </div>
+        <div class="row g-4">
+            <div class="col-lg-8">
+                <div class="portal-card shadow-sm overflow-hidden">
+                    <div class="table-responsive">
+                        <table class="table align-middle portal-table mb-0">
+                            <thead>
+                                <tr>
+                                    <th class="ps-4">Servidor ESXi (Host)</th>
+                                    <th style="width: 250px;">VMs a Desplegar</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for h, val in initial.items() %}
+                                <tr>
+                                    <td class="ps-4">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <i class="bi bi-server text-muted"></i>
+                                            <span class="fw-medium">{{ h }}</span>
+                                        </div>
+                                    </td>
+                                    <td class="pe-4">
+                                        <div class="input-group">
+                                            <input type="number" class="form-control host-count text-center fw-bold" 
+                                                   min="0" step="1" name="host_{{ loop.index0 }}" 
+                                                   value="{{ val }}" data-host="{{ h }}">
+                                            <span class="input-group-text bg-light">VMs</span>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="bg-light p-4 border-top">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center gap-3">
+                                <div id="sum-circle" class="sum-indicator">
+                                    <span id="sum" class="h4 mb-0 fw-bold">0</span>
+                                </div>
+                                <div>
+                                    <h6 class="mb-0 fw-bold">Total Asignado</h6>
+                                    <small class="text-muted text-uppercase ls-1">Debe sumar exactamente <strong>{{ total }}</strong></small>
+                                </div>
+                            </div>
+                            <div id="status-msg" class="text-end fw-bold small">
+                                </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-  <div class="alert alert-secondary">
-    Siguiente paso: verás un <strong>resumen</strong> y tendrás que confirmar antes de iniciar el clonado.
-  </div>
+            <div class="col-lg-4">
+                {% if make_teacher and teacher_user %}
+                <div class="portal-card shadow-sm border-warning-subtle mb-4">
+                    <div class="bg-warning-subtle p-3 border-bottom border-warning-subtle">
+                        <h6 class="mb-0 fw-bold text-warning-emphasis">
+                            <i class="bi bi-person-badge-fill me-2"></i>Entorno Profesor
+                        </h6>
+                    </div>
+                    <div class="p-3">
+                        <div class="alert alert-warning py-2 small mb-3">
+                            VM: <strong>{{ folder }}-{{ teacher_user }}</strong>
+                        </div>
+                        <label class="form-label small fw-bold text-muted">Host de destino para el profesor</label>
+                        <select name="teacher_host" class="form-select form-select-sm">
+                            {% for h in hosts %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                {% endif %}
 
-  <div class="d-flex gap-2">
-    <button id="launch" class="btn btn-primary" type="submit" disabled>Continuar → Resumen</button>
-    <a class="btn btn-outline-primary" href="{{ url_for('create_lab') }}">← Volver</a>
-  </div>
+                <div class="portal-card shadow-sm p-4 mb-4">
+                    <h6 class="fw-bold mb-3 border-bottom pb-2">Opciones Finales</h6>
+                    
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input custom-switch" type="checkbox" name="power_on" id="power_on">
+                        <label class="form-check-label fw-semibold" for="power_on">Encender tras clonar</label>
+                    </div>
 
-</form>
+                    <div class="form-check form-switch mb-4">
+                        <input class="form-check-input custom-switch" type="checkbox" name="make_snapshot" id="make_snapshot">
+                        <label class="form-check-label fw-semibold" for="make_snapshot">Crear Snapshot (Baseline)</label>
+                    </div>
+
+                    <div class="p-3 bg-light rounded-3 border mb-4">
+                        <p class="small text-muted mb-0">
+                            <i class="bi bi-info-circle me-1 text-primary"></i> 
+                            El siguiente paso es una revisión final antes de iniciar el proceso masivo en vCenter.
+                        </p>
+                    </div>
+
+                    <button id="launch" class="btn btn-primary w-100 py-3 fw-bold shadow-sm d-flex align-items-center justify-content-center gap-2" type="submit" disabled>
+                        <span>Revisar y Confirmar</span>
+                        <i class="bi bi-arrow-right"></i>
+                    </button>
+                    
+                    <a class="btn btn-link w-100 mt-2 text-muted text-decoration-none" href="{{ url_for('create_lab') }}">
+                        <i class="bi bi-chevron-left small"></i> Volver al paso 1
+                    </a>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+
+
+<style>
+    /* Estilo del contador circular */
+    .sum-indicator {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 4px solid #dee2e6;
+        transition: all 0.3s ease;
+    }
+
+    .sum-indicator.is-invalid {
+        border-color: #dc3545;
+        color: #dc3545;
+        background-color: #fff5f5;
+    }
+
+    .sum-indicator.is-valid {
+        border-color: var(--green-600);
+        color: var(--green-600);
+        background-color: #f6fff9;
+    }
+
+    .ls-1 { letter-spacing: 0.5px; }
+
+    /* Estilo del Switch Rojo */
+    .custom-switch {
+        width: 2.5em !important;
+        height: 1.25em !important;
+        cursor: pointer;
+    }
+
+    .custom-switch:checked {
+        background-color: var(--red-600) !important;
+        border-color: var(--red-700) !important;
+    }
+
+    .border-warning-subtle {
+        border: 1px solid rgba(255, 193, 7, 0.3) !important;
+    }
+</style>
 
 <script>
-  const total = {{ total }};
-  function recalc() {
-    let sum = 0;
+    const total = {{ total }};
+    const launchBtn = document.getElementById('launch');
+    const sumEl = document.getElementById('sum');
+    const sumCircle = document.getElementById('sum-circle');
+    const statusMsg = document.getElementById('status-msg');
+
+    function recalc() {
+        let sum = 0;
+        document.querySelectorAll('.host-count').forEach(inp => {
+            const v = parseInt(inp.value || '0', 10);
+            if (!isNaN(v)) sum += v;
+        });
+
+        sumEl.textContent = sum.toString();
+        const diff = total - sum;
+
+        if (sum === total) {
+            sumCircle.className = 'sum-indicator is-valid';
+            statusMsg.className = 'text-end fw-bold small text-success';
+            statusMsg.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i> Distribución Correcta';
+            launchBtn.disabled = false;
+        } else {
+            sumCircle.className = 'sum-indicator is-invalid';
+            statusMsg.className = 'text-end fw-bold small text-danger';
+            statusMsg.innerHTML = diff > 0 
+                ? `<i class="bi bi-plus-circle me-1"></i> Faltan ${diff} VMs`
+                : `<i class="bi bi-dash-circle me-1"></i> Sobran ${Math.abs(diff)} VMs`;
+            launchBtn.disabled = true;
+        }
+    }
+
     document.querySelectorAll('.host-count').forEach(inp => {
-      const v = parseInt(inp.value || '0', 10);
-      if (!isNaN(v)) sum += v;
+        inp.addEventListener('input', recalc);
+        inp.addEventListener('change', recalc);
     });
-    const badge = document.getElementById('sum');
-    badge.textContent = sum.toString();
-    const ok = (sum === total);
-    badge.className = ok ? 'badge rounded-pill text-bg-success' : 'badge rounded-pill text-bg-danger';
-    document.getElementById('launch').disabled = !ok;
-  }
-  document.querySelectorAll('.host-count').forEach(inp => {
-    inp.addEventListener('input', recalc);
-    inp.addEventListener('change', recalc);
-  });
-  recalc();
+
+    recalc();
 </script>
 {% endblock %}

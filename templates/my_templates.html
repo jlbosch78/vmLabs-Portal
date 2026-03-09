@@ -1,140 +1,179 @@
 {% extends "layout.html" %}
 {% block body %}
 
-<h2 class="fw-bold mb-2 text-primary">Mis plantillas</h2>
-<p class="text-contrast-70 mb-3">
-  Publica plantillas a partir de tu VM de profesor (ubicada en <strong>{{ teachers_folder }}</strong>).
-  Máximo <strong>{{ max_templates }}</strong> plantillas por laboratorio.
-</p>
+<div class="d-flex align-items-center mb-4">
+    <div>
+        <h2 class="fw-bold mb-1 text-primary">Mis Plantillas</h2>
+        <p class="text-muted mb-0">
+            Gestiona y publica tus entornos desde tu VM de profesor en <strong>{{ teachers_folder }}</strong>
+        </p>
+    </div>
+</div>
 
 {% if active_vcenter_label %}
-<div class="alert alert-info shadow-sm">
-  vCenter activo: <strong>{{ active_vcenter_label }}</strong> · {{ active_vcenter_host }}
+<div class="alert alert-info border-0 shadow-sm d-flex align-items-center mb-4">
+    <i class="bi bi-hdd-network-fill me-2 fs-4"></i>
+    <div>
+        vCenter activo: <strong>{{ active_vcenter_label }}</strong> <span class="opacity-75 ms-2">({{ active_vcenter_host }})</span>
+    </div>
 </div>
 {% endif %}
 
 {% if not labs %}
-  <div class="alert alert-warning">No tienes laboratorios asignados.</div>
-  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
+    <div class="card shadow-sm border-0 text-center p-5">
+        <div class="card-body">
+            <i class="bi bi-folder-x fs-1 text-muted mb-3 d-block"></i>
+            <h5 class="text-muted">No tienes laboratorios asignados.</h5>
+            <a class="btn btn-primary mt-3" href="{{ url_for('home') }}">Volver al Inicio</a>
+        </div>
+    </div>
 {% else %}
 
-  <div class="table-responsive">
-    <table class="table portal-table align-middle">
-      <thead>
-        <tr>
-          <th>Lab</th>
-          <th style="width:240px">VM profesor</th>
-          <th style="width:120px">Cuota</th>
-          <th style="width:220px">Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-      {% for lab in labs %}
+    {% for lab in labs %}
         {% set st = vm_status.get(lab) %}
-        <tr>
-          <td class="fw-medium">{{ lab }}</td>
-          <td class="text-contrast-70">
-            {% if st and st.found %}
-              <span class="badge text-bg-success">Encontrada</span>
-              <div class="small mt-1">{{ st.vm_name }}</div>
-              <div class="small">Estado: <strong>{{ st.power }}</strong></div>
-            {% else %}
-              <span class="badge text-bg-danger">No encontrada</span>
-              <div class="small mt-1">Esperada: <code>{{ st.vm_name }}</code></div>
-            {% endif %}
-          </td>
-          <td>
-            {% set n = quota.get(lab, 0) %}
-            <span class="badge {% if n < max_templates %}text-bg-success{% else %}text-bg-danger{% endif %}">
-              {{ n }}/{{ max_templates }}
-            </span>
-          </td>
-          <td>
-            <form method="post" action="{{ url_for('my_templates_publish') }}"
-                  onsubmit="return confirmPublish('{{ lab|e }}');">
-              <input type="hidden" name="lab_name" value="{{ lab }}">
-              <input type="hidden" name="confirm1" value="">
-              <input type="hidden" name="confirm2" value="">
-              <button class="btn btn-primary btn-sm" type="submit"
-                      {% if not (st and st.found) or (quota.get(lab,0) >= max_templates) %}disabled{% endif %}>
-                Publicar plantilla
-              </button>
-            </form>
-          </td>
-        </tr>
+        {% set tpls = templates_by_lab.get(lab, []) %}
+        {% set has_running = (tpls|selectattr('status','equalto','running')|list|length > 0) %}
+        {% set n = quota.get(lab, 0) %}
 
-        <tr>
-          <td colspan="4" class="pt-0">
-            <div class="small text-contrast-70 mb-2">
-              Plantillas en <strong>{{ templates_root }}/{{ session.get('username') }}</strong> para este lab:
+        <div class="card shadow-sm border-0 mb-4 overflow-hidden">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+                    <div>
+                        <h4 class="fw-bold text-dark mb-1">{{ lab }}</h4>
+                        <div class="d-flex align-items-center gap-2">
+                            {% if st and st.found %}
+                                <span class="badge bg-success-subtle text-success border border-success-subtle px-2">
+                                    <i class="bi bi-check-circle-fill me-1"></i> VM Profesor Lista
+                                </span>
+                                <small class="text-muted">{{ st.vm_name }} ({{ st.power }})</small>
+                            {% else %}
+                                <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2">
+                                    <i class="bi bi-exclamation-triangle-fill me-1"></i> VM no encontrada
+                                </span>
+                                <small class="text-muted">Esperada: <code>{{ st.vm_name }}</code></small>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="text-end">
+                        <div class="small fw-bold text-uppercase text-muted mb-1" style="font-size: 0.7rem;">Cuota de Plantillas</div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="progress flex-grow-1" style="width: 100px; height: 8px;">
+                                <div class="progress-bar {% if n >= max_templates %}bg-danger{% else %}bg-primary{% endif %}" 
+                                     role="progressbar" style="width: {{ (n / max_templates * 100)|int }}%"></div>
+                            </div>
+                            <span class="fw-bold {% if n >= max_templates %}text-danger{% else %}text-primary{% endif %}">
+                                {{ n }}/{{ max_templates }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
             </div>
 
-            {% set tpls = templates_by_lab.get(lab, []) %}
-            {% if not tpls %}
-              <div class="text-muted small">— Sin plantillas —</div>
-            {% else %}
-              <div class="table-responsive">
-                <table class="table table-sm portal-table align-middle mb-0">
-                  <thead>
-                    <tr>
-                      <th>Nombre</th>
-                      <th style="width:180px">Creada</th>
-                      <th style="width:160px">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for t in tpls %}
-                      <tr>
-                        <td class="fw-medium">{{ t.name }}</td>
-                        <td class="text-contrast-70 small">{{ t.created_at }}</td>
-                        <td>
-                          <form method="post" action="{{ url_for('my_templates_delete') }}"
-                                onsubmit="return confirmDeleteTemplate('{{ t.name|e }}', this);">
-                            <input type="hidden" name="template_id" value="{{ t.id }}">
-                            <input type="hidden" name="confirm" value="">
-                            <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar</button>
-                          </form>
-                        </td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+            <div class="card-body px-4 pb-4 mt-2">
+                <div class="mb-4">
+                    <form method="post" action="{{ url_for('my_templates_publish') }}" 
+                          onsubmit="return confirmPublish('{{ lab|e }}');">
+                        <input type="hidden" name="lab_name" value="{{ lab }}">
+                        <input type="hidden" name="confirm1" value="">
+                        <input type="hidden" name="confirm2" value="">
+                        
+                        <button class="btn btn-primary d-inline-flex align-items-center shadow-sm px-4 py-2" type="submit"
+                                {% if not (st and st.found) or (n >= max_templates) or has_running %}disabled{% endif %}>
+                            {% if has_running %}
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                Creando plantilla...
+                            {% else %}
+                                <i class="bi bi-cloud-arrow-up-fill me-2"></i> Publicar nueva plantilla
+                            {% endif %}
+                        </button>
+                    </form>
+                </div>
 
-  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
+                <div class="bg-light rounded-3 p-3">
+                    <h6 class="fw-bold mb-3 text-secondary small text-uppercase">
+                        <i class="bi bi-files me-1"></i> Plantillas Disponibles
+                    </h6>
+
+                    {% if not tpls %}
+                        <p class="text-muted small mb-0 italic">Aún no has creado plantillas para este laboratorio.</p>
+                    {% else %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="small text-muted border-bottom">
+                                    <tr>
+                                        <th>Nombre</th>
+                                        <th>Estado</th>
+                                        <th>Creada</th>
+                                        <th class="text-end">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for t in tpls %}
+                                    <tr class="border-bottom-0">
+                                        <td class="fw-medium">{{ t.name }}</td>
+                                        <td>
+                                            {% if t.status == 'running' %}
+                                                <span class="badge rounded-pill bg-warning text-dark px-3 shadow-sm">
+                                                    <span class="spinner-grow spinner-grow-sm me-1"></span> Creando
+                                                </span>
+                                            {% elif t.status == 'error' %}
+                                                <span class="badge rounded-pill bg-danger px-3 shadow-sm" title="{{ t.error }}">Error</span>
+                                            {% elif t.status == 'deleted' %}
+                                                <span class="badge rounded-pill bg-secondary px-3 shadow-sm">Eliminada</span>
+                                            {% else %}
+                                                <span class="badge rounded-pill bg-success px-3 shadow-sm">Lista</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-muted small">{{ t.created_at }}</td>
+                                        <td class="text-end">
+                                            <div class="d-flex justify-content-end gap-2">
+                                                {% if t.status == 'running' and t.job_id %}
+                                                    <a class="btn btn-outline-secondary btn-sm shadow-sm" href="{{ url_for('job_page', job_id=t.job_id) }}">
+                                                        Ver Job
+                                                    </a>
+                                                {% endif %}
+                                                
+                                                <form method="post" action="{{ url_for('my_templates_delete') }}"
+                                                      onsubmit="return confirmDeleteTemplate('{{ t.name|e }}', this);">
+                                                    <input type="hidden" name="template_id" value="{{ t.id }}">
+                                                    <input type="hidden" name="confirm" value="">
+                                                    <button class="btn btn-danger btn-sm d-flex align-items-center px-3" 
+                                                            type="submit" 
+                                                            {% if t.status == 'running' %}disabled{% endif %}>
+                                                        <i class="bi bi-trash me-1"></i> Eliminar
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% endfor %}
+
+    <div class="mt-4 mb-5">
+        <a class="btn btn-outline-secondary" href="{{ url_for('home') }}">
+            <i class="bi bi-arrow-left"></i> Volver al panel principal
+        </a>
+    </div>
 
 {% endif %}
 
 <script>
   function confirmPublish(labName) {
-    const msg1 =
-`⚠️ PUBLICAR PLANTILLA
-Se apagará tu VM de profesor y se clonará como TEMPLATE.
-
-Lab: ${labName}
-
-Escribe SI para continuar:`;
+    const msg1 = `⚠️ PUBLICAR PLANTILLA\n----------------------------------\nSe apagará tu VM de profesor y se clonará como plantilla.\n\nLab: ${labName.toUpperCase()}\n\nEscribe "SI" para continuar:`;
     const typed1 = prompt(msg1, "");
-    if (typed1 === null || typed1.trim().toUpperCase() !== "SI") {
-      alert("Confirmación incorrecta.");
-      return false;
-    }
+    if (!typed1 || typed1.trim().toUpperCase() !== "SI") return false;
 
-    const msg2 =
-`Confirmación final:
-Escribe PUBLICAR para crear la plantilla:`;
+    const msg2 = `CONFIRMACIÓN FINAL\n----------------------------------\nEscribe "PUBLICAR" para iniciar el proceso:`;
     const typed2 = prompt(msg2, "");
-    if (typed2 === null || typed2.trim().toUpperCase() !== "PUBLICAR") {
-      alert("Confirmación incorrecta.");
-      return false;
-    }
+    if (!typed2 || typed2.trim().toUpperCase() !== "PUBLICAR") return false;
 
     const form = event.target;
     form.querySelector('input[name="confirm1"]').value = "SI";
@@ -143,16 +182,21 @@ Escribe PUBLICAR para crear la plantilla:`;
   }
 
   function confirmDeleteTemplate(tplName, formEl) {
-    const msg =
-`⚠️ ELIMINAR PLANTILLA
-Se borrará del vCenter: ${tplName}
-
-Escribe SI para confirmar:`;
+    const msg = `⚠️ ELIMINAR PLANTILLA\n----------------------------------\nSe borrará del vCenter: ${tplName}\n\nEscribe "SI" para confirmar:`;
     const typed = prompt(msg, "");
-    if (typed === null || typed.trim().toUpperCase() !== "SI") return false;
+    if (!typed || typed.trim().toUpperCase() !== "SI") return false;
     formEl.querySelector('input[name="confirm"]').value = "SI";
     return true;
   }
 </script>
+
+<style>
+    .card { transition: transform 0.2s ease, box-shadow 0.2s ease; border-radius: 12px; }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 .5rem 1rem rgba(0,0,0,.08)!important; }
+    .btn-primary { background: linear-gradient(135deg, #0d6efd 0%, #0a58ca 100%); border: none; }
+    .badge { font-weight: 500; }
+    .bg-light { background-color: #f8f9fa!important; border: 1px solid #edf2f7; }
+    .table th { border-top: none; }
+</style>
 
 {% endblock %}

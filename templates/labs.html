@@ -1,31 +1,132 @@
 {% extends "layout.html" %}
 {% block body %}
-<h2 class="fw-bold mb-2 text-primary">Ver Labs</h2>
-<p class="text-contrast-70 mb-4">Selecciona un laboratorio (carpeta).</p>
 
-{% if session.get('role') == 'admin' %}
-  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-    <a class="btn btn-outline-danger" href="{{ url_for('lab_deletions_page') }}">
-      Programar borrado de laboratorio…
-    </a>
-  </div>
-{% endif %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-1">
+                <i class="bi bi-stack me-2"></i>Explorador de Labs
+            </h2>
+            <p class="text-muted mb-0">
+                {% if session.get('role') == 'admin' %}
+                    Gestionando infraestructura global del vCenter.
+                {% else %}
+                    Tus entornos de laboratorio asignados.
+                {% endif %}
+            </p>
+        </div>
 
-<div class="list-group">
-  {% for lab in labs %}
-    <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-       href="{{ url_for('lab_detail', lab_name=lab.name) }}">
-      <span class="fw-medium">{{ lab.name }}</span>
-      <span class="badge badge-portal">VMs: {{ lab.count }}</span>
-    </a>
-  {% else %}
-    <div class="alert alert-warning">
-      {{ empty_message if empty_message else ("No hay carpetas de lab " ~ prefix ~ ".") }}
+        {% if session.get('role') == 'admin' %}
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-danger shadow-sm d-flex align-items-center gap-2" href="{{ url_for('lab_deletions_page') }}">
+                <i class="bi bi-trash3"></i>
+                <span>Programar Borrado</span>
+            </a>
+        </div>
+        {% endif %}
     </div>
-  {% endfor %}
+
+    <div class="row mb-4">
+        <div class="col-md-6 col-lg-4">
+            <div class="input-group shadow-sm">
+                <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                <input type="text" id="labSearch" class="form-control border-start-0 ps-0" placeholder="Filtrar por nombre...">
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3" id="labGrid">
+        {% for lab in labs %}
+        <div class="col-md-6 col-xl-4 lab-item" data-name="{{ lab.name|lower }}">
+            <a href="{{ url_for('lab_detail', lab_name=lab.name) }}" class="card h-100 lab-card shadow-sm text-decoration-none">
+                <div class="card-body d-flex align-items-center">
+                    <div class="lab-icon-box me-3">
+                        <i class="bi bi-folder2-open fs-4"></i>
+                    </div>
+                    <div class="flex-grow-1 overflow-hidden">
+                        <h6 class="fw-bold text-dark mb-0 text-truncate">{{ lab.name }}</h6>
+                        <small class="text-muted">Carpeta de recursos</small>
+                    </div>
+                    <div class="text-end ms-2">
+                        <span class="badge rounded-pill bg-primary-subtle text-primary border border-primary-subtle px-3">
+                            {{ lab.count }} VMs
+                        </span>
+                        <i class="bi bi-chevron-right ms-2 text-light-emphasis"></i>
+                    </div>
+                </div>
+            </a>
+        </div>
+        {% else %}
+        <div class="col-12">
+            <div class="alert alert-light border-dashed text-center py-5">
+                <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
+                <p class="text-muted mb-0">
+                    {{ empty_message if empty_message else ("No se encontraron carpetas con el prefijo '" ~ prefix ~ "'.") }}
+                </p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="mt-5 pt-3 border-top">
+        <a class="btn btn-link text-decoration-none p-0 text-muted" href="{{ url_for('home') }}">
+            <i class="bi bi-arrow-left me-1"></i> Volver al panel principal
+        </a>
+    </div>
 </div>
 
-<div class="mt-3">
-  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
-</div>
+<style>
+    /* Estilo de las tarjetas de Lab */
+    .lab-card {
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 14px;
+        transition: all 0.2s ease-in-out;
+    }
+    .lab-card:hover {
+        transform: scale(1.02);
+        border-color: var(--bs-primary);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.05) !important;
+        background-color: #fcfdfe;
+    }
+    
+    /* Icono de carpeta lateral */
+    .lab-icon-box {
+        width: 48px;
+        height: 48px;
+        background-color: #f8f9fa;
+        color: #6c757d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 10px;
+        transition: all 0.2s ease;
+    }
+    .lab-card:hover .lab-icon-box {
+        background-color: var(--bs-primary);
+        color: white;
+    }
+
+    /* Estilo para "Sin resultados" */
+    .border-dashed {
+        border: 2px dashed #dee2e6 !important;
+        background: transparent;
+    }
+
+    /* Badge personalizado */
+    .bg-primary-subtle {
+        background-color: #e7f1ff !important;
+    }
+</style>
+
+<script>
+    // Filtro de búsqueda en tiempo real
+    document.getElementById('labSearch').addEventListener('input', function(e) {
+        const term = e.target.value.toLowerCase();
+        document.querySelectorAll('.lab-item').forEach(item => {
+            const name = item.getAttribute('data-name');
+            item.style.display = name.includes(term) ? 'block' : 'none';
+        });
+    });
+</script>
+
 {% endblock %}

@@ -5,178 +5,184 @@
 {% set is_admin = (session.get('role') == 'admin') %}
 {% set vc_ready = (not is_admin) or (active_vcenter_id) %}
 
-<div class="auth-wrap">
-  <div class="auth-card usj-card shadow-sm">
-    <div class="auth-header">
-      <div class="auth-logo" aria-hidden="true">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M4 18V8l8-5 8 5v10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-          <path d="M9 21v-8h6v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <div>
-        <div class="auth-title">Panel principal</div>
-        <div class="auth-subtitle text-contrast-70">
-          Has iniciado sesión como <strong>{{ session.get("username") }}</strong>.
-          {% if is_admin %}
-            Elige una opción.
-          {% else %}
-            Acceso Profesor: solo administración de Labs.
-          {% endif %}
+<div class="container py-5">
+    <div class="row mb-4">
+        <div class="col-12 text-center text-md-start d-md-flex align-items-center justify-content-between">
+            <div>
+                <h1 class="fw-bold text-primary mb-1">¡Hola, {{ session.get("username") }}! 👋</h1>
+                <p class="text-muted">
+                    {% if is_admin %}
+                        Panel de Administración Central · <span class="badge bg-secondary">Administrador</span>
+                    {% else %}
+                        Gestión de Laboratorios y Plantillas · <span class="badge bg-info text-dark">Profesor</span>
+                    {% endif %}
+                </p>
+            </div>
+            
+            {% if is_admin and not active_vcenter_id %}
+            <div class="alert alert-warning d-inline-flex align-items-center shadow-sm mb-0 py-2">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <small>Selecciona un <strong>vCenter</strong> arriba para desbloquear funciones.</small>
+            </div>
+            {% endif %}
         </div>
-      </div>
     </div>
 
-    {# Si eres admin, muchas secciones dependen del vCenter activo #}
-    {% if is_admin and not active_vcenter_id %}
-      <div class="alert alert-warning mt-3">
-        Para continuar (Crear/Ver Labs, Programación o Plantillas), selecciona un vCenter en la barra superior.
-      </div>
-    {% endif %}
+    <div class="row g-4">
+        
+        {% if is_admin %}
+        <div class="col-12">
+            <h6 class="text-uppercase text-muted fw-bold small mb-3">Infraestructura y Labs</h6>
+        </div>
+        
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('create_lab') if vc_ready else '#' }}" 
+               class="card h-100 action-card {{ 'disabled' if not vc_ready }}">
+                <div class="card-body">
+                    <div class="icon-box bg-primary-subtle text-primary mb-3">
+                        <i class="bi bi-plus-circle-fill fs-3"></i>
+                    </div>
+                    <h5 class="fw-bold">Crear nuevo Lab</h5>
+                    <p class="text-muted small">Despliega un nuevo entorno de laboratorio desde cero.</p>
+                </div>
+                {% if not vc_ready %}<div class="card-footer py-1 text-center bg-light small">vCenter Requerido</div>{% endif %}
+            </a>
+        </div>
 
-    <div class="d-grid gap-3 mt-3">
-
-      {# ADMIN: Crear lab (requiere vCenter seleccionado) #}
-      {% if is_admin %}
-        {% if vc_ready %}
-          <a class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2"
-             href="{{ url_for('create_lab') }}">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Crear Lab
-          </a>
-        {% else %}
-          <button class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2" disabled>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Crear Lab <span class="ms-2 small text-contrast-70">(elige vCenter)</span>
-          </button>
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('labs') if vc_ready else '#' }}" 
+               class="card h-100 action-card {{ 'disabled' if not vc_ready }}">
+                <div class="card-body">
+                    <div class="icon-box bg-success-subtle text-success mb-3">
+                        <i class="bi bi-stack fs-3"></i>
+                    </div>
+                    <h5 class="fw-bold">Admin Labs</h5>
+                    <p class="text-muted small">Supervisa, apaga o elimina laboratorios activos.</p>
+                </div>
+            </a>
+        </div>
         {% endif %}
-      {% endif %}
 
-      {# Admin Labs (admin requiere vCenter; profesor siempre lo tiene asignado) #}
-      {% if vc_ready %}
-        <a class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2"
-           href="{{ url_for('labs') }}">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M8 6v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
-          </svg>
-          Admin Labs
-        </a>
-      {% else %}
-        <button class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2" disabled>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M8 6v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
-          </svg>
-          Admin Labs <span class="ms-2 small text-contrast-70">(elige vCenter)</span>
-        </button>
-      {% endif %}
+        {% if is_admin %}
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('users_admin') }}" class="card h-100 action-card">
+                <div class="card-body">
+                    <div class="icon-box bg-info-subtle text-info mb-3">
+                        <i class="bi bi-people-fill fs-3"></i>
+                    </div>
+                    <h5 class="fw-bold">Usuarios</h5>
+                    <p class="text-muted small">Gestiona permisos de profesores y acceso al portal.</p>
+                </div>
+            </a>
+        </div>
 
-      {# ADMIN: Usuarios #}
-      {% if is_admin %}
-        <a class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2"
-           href="{{ url_for('users_admin') }}">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M20 8v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M17 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          Admin Usuarios
-        </a>
-      {% endif %}
-
-      {# ADMIN: Programación ON/OFF (requiere vCenter) #}
-      {% if is_admin %}
-        {% if vc_ready %}
-          <a class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2"
-             href="{{ url_for('schedule_page') }}">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
-              <path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Programar Inicio/Apagado
-          </a>
-        {% else %}
-          <button class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2" disabled>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
-              <path d="M12 7v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            Programar Inicio/Apagado <span class="ms-2 small text-contrast-70">(elige vCenter)</span>
-          </button>
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('schedule_page') if vc_ready else '#' }}" 
+               class="card h-100 action-card {{ 'disabled' if not vc_ready }}">
+                <div class="card-body">
+                    <div class="icon-box bg-warning-subtle text-warning mb-3">
+                        <i class="bi bi-calendar-check-fill fs-3"></i>
+                    </div>
+                    <h5 class="fw-bold">Programación</h5>
+                    <p class="text-muted small">Configura encendidos y apagados automáticos.</p>
+                </div>
+            </a>
+        </div>
         {% endif %}
-      {% endif %}
 
-      {# PROFESOR: Mis plantillas #}
-      {% if not is_admin %}
-        <a class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2"
-           href="{{ url_for('my_templates') }}">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M4 4h16v6H4z" stroke="currentColor" stroke-width="2"/>
-            <path d="M7 14h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            <path d="M7 18h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-          Mis plantillas
-        </a>
-      {% endif %}
-
-      {# ADMIN: Plantillas profesores (requiere vCenter) #}
-      {% if is_admin %}
-        {% if vc_ready %}
-          <a class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2"
-             href="{{ url_for('teacher_templates_admin') }}">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 4h16v6H4z" stroke="currentColor" stroke-width="2"/>
-              <path d="M6 14h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              <path d="M6 18h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Plantillas profesores
-          </a>
-        {% else %}
-          <button class="btn btn-outline-primary btn-lg auth-btn d-flex align-items-center justify-content-center gap-2" disabled>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 4h16v6H4z" stroke="currentColor" stroke-width="2"/>
-              <path d="M6 14h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-              <path d="M6 18h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-            </svg>
-            Plantillas profesores <span class="ms-2 small text-contrast-70">(elige vCenter)</span>
-          </button>
+        <div class="col-md-6 col-lg-4">
+            {% if is_admin %}
+                <a href="{{ url_for('teacher_templates_admin') if vc_ready else '#' }}" 
+                   class="card h-100 action-card {{ 'disabled' if not vc_ready }}">
+                    <div class="card-body">
+                        <div class="icon-box bg-purple-subtle text-purple mb-3">
+                            <i class="bi bi-journal-code fs-3"></i>
+                        </div>
+                        <h5 class="fw-bold">Plantillas Profesores</h5>
+                        <p class="text-muted small">Administra las imágenes publicadas por el staff.</p>
+                    </div>
+                </a>
+            {% else %}
+                <a href="{{ url_for('my_templates') }}" class="card h-100 action-card">
+                    <div class="card-body">
+                        <div class="icon-box bg-primary-subtle text-primary mb-3">
+                            <i class="bi bi-cloud-arrow-up-fill fs-3"></i>
+                        </div>
+                        <h5 class="fw-bold">Mis Plantillas</h5>
+                        <p class="text-muted small">Crea y gestiona tus propias imágenes de laboratorio.</p>
+                    </div>
+                </a>
+            {% endif %}
+        </div>
+        
+        {% if not is_admin %}
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('labs') }}" class="card h-100 action-card">
+                <div class="card-body">
+                    <div class="icon-box bg-success-subtle text-success mb-3">
+                        <i class="bi bi-display fs-3"></i>
+                    </div>
+                    <h5 class="fw-bold">Mis Laboratorios</h5>
+                    <p class="text-muted small">Accede a las máquinas virtuales de tus labs.</p>
+                </div>
+            </a>
+        </div>
         {% endif %}
-      {% endif %}
 
-      {# Cambiar contraseña (siempre) #}
-      <a class="btn btn-outline-primary auth-btn w-100 d-flex align-items-center justify-content-center gap-2"
-         href="{{ url_for('account_password') }}">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M14.5 10a4.5 4.5 0 1 0-1.2 3.1L21 15.8V19h-3v-2h-2v-2h-2.2l-1.3-1.3"
-                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="10" cy="10" r="1" fill="currentColor"/>
-        </svg>
-        Cambiar contraseña
-      </a>
+        <div class="col-md-6 col-lg-4">
+            <a href="{{ url_for('account_password') }}" class="card h-100 action-card border-dashed">
+                <div class="card-body">
+                    <div class="icon-box bg-secondary-subtle text-secondary mb-3">
+                        <i class="bi bi-shield-lock-fill fs-3"></i>
+                    </div>
+                    <h5 class="fw-bold">Contraseña</h5>
+                    <p class="text-muted small">Actualiza tus credenciales de acceso.</p>
+                </div>
+            </a>
+        </div>
 
     </div>
 
-    <hr class="my-4">
-
-    <a class="btn btn-outline-primary auth-btn w-100 d-flex align-items-center justify-content-center gap-2"
-       href="{{ url_for('logout') }}"
-       onclick="return confirm('¿Cerrar sesión?');">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M10 7V6a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-1"
-              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M13 12H3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        <path d="M7 8l-4 4 4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-      Cerrar sesión
-    </a>
-
-  </div>
+    <div class="row mt-5">
+        <div class="col-12 text-center">
+            <a href="{{ url_for('logout') }}" class="btn btn-link text-danger text-decoration-none" onclick="return confirm('¿Cerrar sesión?');">
+                <i class="bi bi-box-arrow-right me-1"></i> Cerrar sesión de forma segura
+            </a>
+        </div>
+    </div>
 </div>
+
+<style>
+    /* Estilos específicos para el Home */
+    .action-card {
+        text-decoration: none;
+        color: inherit;
+        transition: all 0.3s cubic-bezier(.25,.8,.25,1);
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 16px;
+    }
+    .action-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 10px 20px rgba(0,0,0,0.1) !important;
+        border-color: var(--bs-primary);
+    }
+    .action-card.disabled {
+        pointer-events: none;
+        opacity: 0.6;
+        filter: grayscale(1);
+        background-color: #f8f9fa;
+    }
+    .icon-box {
+        width: 60px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 12px;
+    }
+    .bg-purple-subtle { background-color: #f3e5f5; }
+    .text-purple { color: #8e24aa; }
+    .border-dashed { border-style: dashed !important; }
+</style>
 
 {% endblock %}

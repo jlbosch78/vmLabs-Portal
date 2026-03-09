@@ -1,128 +1,206 @@
 {% extends "layout.html" %}
 {% block body %}
-<h2 class="fw-bold mb-2 text-primary">Paso 3 · Confirmar creación del laboratorio</h2>
-<p class="text-contrast-70 mb-3">Revisa el resumen. Al confirmar se iniciará el clonado en vCenter.</p>
 
-{% if active_vcenter_label %}
-<div class="alert alert-info shadow-sm">
-  vCenter activo: <strong>{{ active_vcenter_label }}</strong> · {{ active_vcenter_host }}
-</div>
-{% endif %}
-
-<div class="row g-3">
-  <div class="col-12 col-lg-6">
-    <div class="p-3 border rounded-3 h-100">
-      <div class="fw-bold mb-2">Resumen</div>
-
-      <div class="small text-contrast-70">
-        <div><strong>Template:</strong> {{ template }}</div>
-        <div><strong>Carpeta destino:</strong> {{ folder }}</div>
-        <div><strong>Datastore:</strong> {{ datastore }}</div>
-        <div><strong>Red:</strong> {{ network }}</div>
-        <div><strong>Usuarios (CSV):</strong> {{ total_csv }}</div>
-        <div><strong>Encender tras crear:</strong> {{ "Sí" if power_on else "No" }}</div>
-        <div><strong>Snapshot baseline:</strong> {{ "Sí" if make_snapshot else "No" }}</div>
-        <div class="mt-2">
-          <strong>VM profesor:</strong>
-          {% if make_teacher and teacher_user %}
-            Sí · <code>{{ folder }}-{{ teacher_user }}</code> (host: {{ teacher_host or "auto" }})
-          {% else %}
-            No
-          {% endif %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-end mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-1">
+                <i class="bi bi-shield-check me-2"></i>Paso 3: Revisión de Seguridad
+            </h2>
+            <p class="text-muted mb-0">Revisa cuidadosamente los parámetros antes de iniciar el aprovisionamiento masivo.</p>
         </div>
-      </div>
-
-      <hr class="my-3">
-
-      <div class="fw-bold mb-2">Vista previa de nombres</div>
-      <ul class="small text-contrast-70 mb-0">
-        {% for n in vm_preview %}
-          <li><code>{{ n }}</code></li>
-        {% endfor %}
-        {% if remaining_count > 0 %}
-          <li>… y {{ remaining_count }} VM(s) más</li>
-        {% endif %}
-      </ul>
+        <div class="text-end d-none d-md-block">
+            <span class="badge bg-success rounded-pill px-3 shadow-sm">Listo para ejecutar</span>
+        </div>
     </div>
-  </div>
 
-  <div class="col-12 col-lg-6">
-    <div class="p-3 border rounded-3 h-100">
-      <div class="fw-bold mb-2">Distribución por host</div>
-      <div class="table-responsive">
-        <table class="table align-middle portal-table mb-0">
-          <thead>
-            <tr><th>Host</th><th style="width:160px">VMs</th></tr>
-          </thead>
-          <tbody>
-            {% for h, n in counts %}
-              <tr>
-                <td class="fw-medium">{{ h }}</td>
-                <td><span class="badge text-bg-light border">{{ n }}</span></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td class="fw-bold">Total</td>
-              <td class="fw-bold">{{ total_counts }}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      <div class="alert alert-warning mt-3 mb-0">
-        Para confirmar la creación, escribe <strong>{{ folder }}</strong> en el cuadro que aparecerá al pulsar “Confirmar y crear”.
-      </div>
+    {% if active_vcenter_label %}
+    <div class="alert alert-info border-0 shadow-sm d-flex align-items-center mb-4">
+        <i class="bi bi-cloud-check-fill fs-4 me-3"></i>
+        <div>
+            Destino Activo: <strong>{{ active_vcenter_label }}</strong> 
+            <span class="mx-2 text-muted">|</span> 
+            <code class="text-dark">{{ active_vcenter_host }}</code>
+        </div>
     </div>
-  </div>
+    {% endif %}
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="portal-card shadow-sm mb-4 h-100">
+                <div class="bg-light p-3 border-bottom d-flex justify-content-between">
+                    <h6 class="mb-0 fw-bold text-uppercase small text-muted">Detalles Técnicos</h6>
+                    <i class="bi bi-gear-fill text-muted"></i>
+                </div>
+                <div class="p-4">
+                    <div class="row g-3">
+                        <div class="col-sm-6">
+                            <label class="text-muted small d-block">Plantilla / Template</label>
+                            <span class="fw-bold"><i class="bi bi-copy me-1"></i>{{ template }}</span>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="text-muted small d-block">Carpeta Destino</label>
+                            <span class="fw-bold text-primary"><i class="bi bi-folder-fill me-1"></i>{{ folder }}</span>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="text-muted small d-block">Datastore</label>
+                            <span class="fw-bold"><i class="bi bi-database me-1"></i>{{ datastore }}</span>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="text-muted small d-block">Red Asignada</label>
+                            <span class="fw-bold"><i class="bi bi-ethernet me-1"></i>{{ network }}</span>
+                        </div>
+                    </div>
+
+                    <hr class="my-4 opacity-10">
+
+                    <div class="row g-3">
+                        <div class="col-sm-4">
+                            <div class="p-2 border rounded-3 text-center">
+                                <label class="text-muted x-small d-block text-uppercase">Total Usuarios</label>
+                                <span class="h4 fw-bold mb-0">{{ total_csv }}</span>
+                            </div>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="p-2 border rounded-3 text-center">
+                                <label class="text-muted x-small d-block text-uppercase">Auto Power ON</label>
+                                <span class="fw-bold d-block">{{ "SÍ" if power_on else "NO" }}</span>
+                            </div>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="p-2 border rounded-3 text-center">
+                                <label class="text-muted x-small d-block text-uppercase">Snapshot</label>
+                                <span class="fw-bold d-block">{{ "SÍ" if make_snapshot else "NO" }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 p-3 bg-primary-subtle rounded-3">
+                        <h6 class="fw-bold small mb-2">Previsualización de Nombres:</h6>
+                        <div class="d-flex flex-wrap gap-1">
+                            {% for n in vm_preview %}
+                                <code class="bg-white px-2 py-1 rounded border small">{{ n }}</code>
+                            {% endfor %}
+                            {% if remaining_count > 0 %}
+                                <span class="text-muted small ms-2">... y {{ remaining_count }} más</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="portal-card shadow-sm mb-4">
+                <div class="bg-light p-3 border-bottom">
+                    <h6 class="mb-0 fw-bold text-uppercase small text-muted">Carga por Host</h6>
+                </div>
+                <div class="p-0">
+                    <table class="table table-sm align-middle mb-0 portal-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-4 py-2">Servidor</th>
+                                <th class="text-center py-2">VMs</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for h, n in counts %}
+                            <tr>
+                                <td class="ps-4">
+                                    <small class="fw-medium text-muted"><i class="bi bi-server me-2"></i>{{ h }}</small>
+                                </td>
+                                <td class="text-center">
+                                    <span class="badge bg-dark rounded-pill">{{ n }}</span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <td class="ps-4 fw-bold">TOTAL DESPLIEGUE</td>
+                                <td class="text-center fw-bold text-primary">{{ total_counts }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            {% if make_teacher and teacher_user %}
+            <div class="portal-card shadow-sm border-warning-subtle p-3 mb-4">
+                <div class="d-flex align-items-center gap-2 mb-2 text-warning-emphasis">
+                    <i class="bi bi-person-badge-fill"></i>
+                    <span class="fw-bold">VM Profesor Activa</span>
+                </div>
+                <div class="small">
+                    Nombre: <code>{{ folder }}-{{ teacher_user }}</code><br>
+                    Host: <span class="fw-bold">{{ teacher_host or "Auto" }}</span>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="alert alert-warning border-0 shadow-sm mb-4">
+                <div class="d-flex gap-2">
+                    <i class="bi bi-exclamation-triangle-fill fs-4"></i>
+                    <p class="small mb-0">
+                        Esta acción clonará <strong>{{ total_counts }}</strong> máquinas simultáneamente. Se requerirá confirmación de seguridad.
+                    </p>
+                </div>
+            </div>
+
+            <form id="confirmCreateForm" method="post" action="{{ url_for('start_job_with_distribution') }}">
+                <input type="hidden" name="template" value="{{ template }}">
+                <input type="hidden" name="folder" value="{{ folder }}">
+                <input type="hidden" name="datastore" value="{{ datastore }}">
+                <input type="hidden" name="network" value="{{ network }}">
+                <input type="hidden" name="csv_path" value="{{ csv_path }}">
+                <input type="hidden" name="host_names" value="{{ host_names }}">
+                {% for idx, pair in host_inputs %}<input type="hidden" name="host_{{ idx }}" value="{{ pair[1] }}">{% endfor %}
+                {% if power_on %}<input type="hidden" name="power_on" value="on">{% endif %}
+                {% if make_snapshot %}<input type="hidden" name="make_snapshot" value="on">{% endif %}
+                {% if make_teacher %}
+                    <input type="hidden" name="make_teacher" value="on">
+                    <input type="hidden" name="teacher_user" value="{{ teacher_user }}">
+                    <input type="hidden" name="teacher_host" value="{{ teacher_host }}">
+                {% endif %}
+
+                <button class="btn btn-primary w-100 py-3 fw-bold shadow d-flex align-items-center justify-content-center gap-2" type="submit">
+                    <i class="bi bi-rocket-takeoff-fill"></i>
+                    Confirmar y Crear Laboratorio
+                </button>
+                <a class="btn btn-outline-secondary w-100 mt-2" href="javascript:history.back()">
+                    Corregir datos
+                </a>
+            </form>
+        </div>
+    </div>
 </div>
 
-<form id="confirmCreateForm" method="post" action="{{ url_for('start_job_with_distribution') }}" class="mt-3">
-  <input type="hidden" name="template" value="{{ template }}">
-  <input type="hidden" name="folder" value="{{ folder }}">
-  <input type="hidden" name="datastore" value="{{ datastore }}">
-  <input type="hidden" name="network" value="{{ network }}">
-  <input type="hidden" name="csv_path" value="{{ csv_path }}">
-  <input type="hidden" name="host_names" value="{{ host_names }}">
 
-  {% for idx, pair in host_inputs %}
-    <input type="hidden" name="host_{{ idx }}" value="{{ pair[1] }}">
-  {% endfor %}
 
-  {% if power_on %}
-    <input type="hidden" name="power_on" value="on">
-  {% endif %}
-  {% if make_snapshot %}
-    <input type="hidden" name="make_snapshot" value="on">
-  {% endif %}
-
-  {% if make_teacher %}
-    <input type="hidden" name="make_teacher" value="on">
-    <input type="hidden" name="teacher_user" value="{{ teacher_user }}">
-    <input type="hidden" name="teacher_host" value="{{ teacher_host }}">
-  {% endif %}
-
-  <div class="d-flex gap-2">
-    <button class="btn btn-primary" type="submit">Confirmar y crear</button>
-    <a class="btn btn-outline-primary" href="javascript:history.back()">← Volver</a>
-  </div>
-</form>
+<style>
+    .x-small { font-size: 0.65rem; letter-spacing: 0.5px; }
+    .bg-primary-subtle { background-color: rgba(200, 16, 46, 0.05) !important; border: 1px dashed rgba(200, 16, 46, 0.2); }
+    .border-warning-subtle { border: 1px solid rgba(255, 193, 7, 0.4) !important; background-color: #fffdf5; }
+    
+    .portal-table th { background: #f8f9fa !important; border-bottom: 1px solid #dee2e6 !important; color: #6c757d !important; }
+    
+    code { color: var(--red-600); }
+</style>
 
 <script>
-  (function(){
-    const form = document.getElementById("confirmCreateForm");
-    const expected = {{ folder|tojson }};
-    form.addEventListener("submit", function(e){
-      const typed = prompt(
-        "⚠️ Confirmación: escribe EXACTAMENTE el nombre de la carpeta del lab para iniciar el clonado:\n\n" + expected,
-        ""
-      );
-      if (typed === null || typed.trim() !== expected) {
-        e.preventDefault();
-        alert("Confirmación incorrecta. No se inició la creación.");
-      }
-    });
-  })();
+    (function(){
+        const form = document.getElementById("confirmCreateForm");
+        const expected = {{ folder|tojson }};
+        form.addEventListener("submit", function(e){
+            const typed = prompt(
+                "⚠️ CONFIRMACIÓN CRÍTICA\n\nEstás a punto de iniciar el despliegue de " + {{ total_counts }} + " VMs.\n" +
+                "Para continuar, escribe EXACTAMENTE el nombre de la carpeta:\n\n" + expected
+            );
+            if (typed === null || typed.trim() !== expected) {
+                e.preventDefault();
+                alert("Confirmación fallida. El proceso no ha sido iniciado.");
+            }
+        });
+    })();
 </script>
 {% endblock %}

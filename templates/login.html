@@ -2,36 +2,116 @@
 {% set no_shell = true %}
 {% block body %}
 
-<div class="auth-wrap">
-  <div class="auth-card portal-card shadow-sm">
-    <div class="auth-header">
-      <div class="auth-logo" aria-hidden="true">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
-          <path d="M12 3l8 7v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10l8-7Z"
-                stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
-          <path d="M9 22v-8h6v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-        </svg>
-      </div>
-      <div>
-        <div class="auth-title">User Login</div>
-        <div class="auth-subtitle text-contrast-70">Introduce tus credenciales del portal.</div>
-      </div>
-    </div>
+<div class="login-container">
+    <div class="auth-card shadow-lg">
+        <div class="auth-accent-line"></div>
+        
+        <div class="p-4 p-md-5">
+            <div class="auth-header text-center mb-4">
+                <div class="auth-logo-circle mb-3">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <path d="M12 8v4"/><path d="M12 16h.01"/>
+                    </svg>
+                </div>
+                <h3 class="fw-bold text-dark mb-1">Portal</h3>
+                <p class="text-muted small">Gestión de infraestructura virtual</p>
+            </div>
 
-    <form method="post" class="row g-3" autocomplete="off">
-      <div class="col-12">
-        <label class="form-label">Usuario</label>
-        <input class="form-control" name="username" required>
-      </div>
-      <div class="col-12">
-        <label class="form-label">Contraseña</label>
-        <input class="form-control" type="password" name="password" required>
-      </div>
-      <div class="col-12">
-        <button class="btn btn-primary w-100 auth-btn" type="submit">Login</button>
-      </div>
-    </form>
-  </div>
+            <form method="post" autocomplete="off">
+                <div class="form-floating mb-3">
+                    <input type="text" class="form-control" id="userInput" name="username" placeholder="Usuario" required autofocus>
+                    <label for="userInput"><i class="bi bi-person me-2"></i>Usuario</label>
+                </div>
+
+                <div class="form-floating mb-4">
+                    <input type="password" class="form-control" id="passInput" name="password" placeholder="Contraseña" required>
+                    <label for="passInput"><i class="bi bi-lock me-2"></i>Contraseña</label>
+                </div>
+
+                <button class="btn btn-primary w-100 py-3 fw-bold shadow-sm auth-submit-btn" type="submit">
+                    Acceder al Panel
+                    <i class="bi bi-arrow-right-short ms-1"></i>
+                </button>
+            </form>
+            
+            <div class="mt-4 text-center">
+                <small class="text-muted">© {{ now.year if now }} · Sistema de Laboratorios</small>
+            </div>
+        </div>
+    </div>
 </div>
+
+<style>
+    /* Contenedor principal con fondo sutil */
+    .login-container {
+        min-height: 80vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    /* Tarjeta de Login estilo "Glassmorphism" o Flat Moderno */
+    .auth-card {
+        width: 100%;
+        max-width: 420px;
+        background: white;
+        border-radius: 24px;
+        border: none;
+        overflow: hidden;
+        position: relative;
+    }
+
+    /* Línea de acento superior */
+    .auth-accent-line {
+        height: 6px;
+        background: linear-gradient(90deg, #0d6efd 0%, #0dcaf0 100%);
+        width: 100%;
+    }
+
+    /* Logo Circular */
+    .auth-logo-circle {
+        width: 64px;
+        height: 64px;
+        background: #f0f7ff;
+        color: #0d6efd;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto;
+    }
+
+    /* Estilo de los Inputs */
+    .form-floating > .form-control {
+        border-radius: 12px;
+        border: 1px solid #e0e6ed;
+        background-color: #fcfdfe;
+    }
+
+    .form-floating > .form-control:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.1);
+        background-color: #fff;
+    }
+
+    /* Botón de envío con efecto */
+    .auth-submit-btn {
+        border-radius: 12px;
+        transition: all 0.3s ease;
+    }
+
+    .auth-submit-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 15px rgba(13, 110, 253, 0.2) !important;
+    }
+
+    /* Ajuste para iconos en etiquetas flotantes */
+    .form-floating > label {
+        padding-left: 1rem;
+        color: #6c757d;
+    }
+</style>
 
 {% endblock %}

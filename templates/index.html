@@ -1,83 +1,181 @@
 {% extends "layout.html" %}
 {% block body %}
-<h2 class="fw-bold mb-2 text-primary">Paso 1 · Crear laboratorio</h2>
-<p class="text-contrast-70 mb-4">Selecciona plantilla, carpeta, datastore, red y sube el CSV de usuarios.</p>
 
-<form method="post" enctype="multipart/form-data" action="{{ url_for('plan_distribution') }}" class="row g-3">
-  <div class="col-md-6">
-    <label class="form-label">Plantilla</label>
-    <select name="template" class="form-select" required>
-      <option value="" disabled selected>Selecciona plantilla…</option>
-      {% for t in templates %}<option value="{{t}}">{{t}}</option>{% endfor %}
-    </select>
-  </div>
-
-  <div class="col-md-6">
-    <label class="form-label">Carpeta Lab de destino</label>
-    <select name="folder" class="form-select">
-      <option value="" selected>— seleccionar —</option>
-      {% for f in folders %}<option value="{{f}}">{{f}}</option>{% endfor %}
-    </select>
-  </div>
-
-  <div class="col-md-6">
-    <label class="form-label">(Opc) Crear carpeta nueva (Debe comenzar con Lab - nombre del Lab)</label>
-    <input class="form-control" name="new_folder" placeholder="Nombre carpeta nueva">
-  </div>
-
-  <div class="col-md-6">
-    <label class="form-label">Datastore</label>
-    <select name="datastore" class="form-select" required>
-      <option value="" disabled selected>Selecciona datastore…</option>
-      {% for d in datastores %}<option value="{{d}}">{{d}}</option>{% endfor %}
-    </select>
-  </div>
-
-  <div class="col-md-6">
-    <label class="form-label">Red</label>
-    <select name="network" class="form-select" required>
-      <option value="" disabled selected>Selecciona red…</option>
-      {% for n in networks %}<option value="{{n}}">{{n}}</option>{% endfor %}
-    </select>
-  </div>
-
-  <div class="col-md-6">
-    <label class="form-label">CSV de usuarios</label>
-    <input class="form-control" type="file" name="csvfile" accept=".csv" required>
-    <div class="form-text">Una columna <code>usuario</code> o lista simple (uno por línea) sin @dominio.</div>
-  </div>
-  <div class="col-12">
-    <hr class="my-3">
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" name="make_teacher" id="make_teacher">
-      <label class="form-check-label" for="make_teacher">
-        Crear VM para profesor
-      </label>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-end mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-1">
+                <i class="bi bi-magic me-2"></i>Paso 1: Configurar Laboratorio
+            </h2>
+            <p class="text-muted mb-0">Define los recursos base y el inventario de alumnos para el despliegue masivo.</p>
+        </div>
+        <div class="text-end d-none d-md-block">
+            <span class="badge bg-primary rounded-pill px-3">Paso 1 de 2</span>
+        </div>
     </div>
-  </div>
 
-  <div class="col-md-6" id="teacher_user_wrap" style="display:none;">
-    <label class="form-label">Usuario del profesor</label>
-    <input class="form-control" name="teacher_user" placeholder="ej. profesor1">
-    <div class="form-text">La VM se llamará <code>carpeta-usuario</code> y se guardará en la carpeta <strong>Profesores</strong>.</div>
-  </div>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('plan_distribution') }}" class="row g-4">
+        
+        <div class="col-lg-8">
+            <div class="portal-card shadow-sm mb-4">
+                <div class="bg-light p-3 border-bottom">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-hdd-network me-2 text-primary"></i>Infraestructura de Destino</h6>
+                </div>
+                <div class="p-4">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Plantilla Origen</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="bi bi-copy text-muted"></i></span>
+                                <select name="template" class="form-select" required>
+                                    <option value="" disabled selected>Selecciona plantilla…</option>
+                                    {% for t in templates %}<option value="{{t}}">{{t}}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
 
-  <script>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Datastore</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="bi bi-database text-muted"></i></span>
+                                <select name="datastore" class="form-select" required>
+                                    <option value="" disabled selected>Selecciona datastore…</option>
+                                    {% for d in datastores %}<option value="{{d}}">{{d}}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="col-md-12">
+                            <label class="form-label fw-semibold">Red (PortGroup)</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="bi bi-ethernet text-muted"></i></span>
+                                <select name="network" class="form-select" required>
+                                    <option value="" disabled selected>Selecciona red…</option>
+                                    {% for n in networks %}<option value="{{n}}">{{n}}</option>{% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="portal-card shadow-sm">
+                <div class="bg-light p-3 border-bottom">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-folder-symlink me-2 text-primary"></i>Ubicación y Carpetas</h6>
+                </div>
+                <div class="p-4 text-center">
+                    <div class="row g-3 text-start">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Carpeta Lab existente</label>
+                            <select name="folder" class="form-select">
+                                <option value="" selected>— seleccionar —</option>
+                                {% for f in folders %}<option value="{{f}}">{{f}}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 text-center d-flex align-items-center justify-content-center d-none d-md-flex">
+                            <span class="text-muted fw-bold">O</span>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Crear carpeta nueva</label>
+                            <input class="form-control" name="new_folder" placeholder="Lab - NombreEjemplo">
+                            <div class="form-text">Debe comenzar por <code class="text-danger">Lab -</code></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="portal-card shadow-sm border-primary-subtle mb-4">
+                <div class="bg-primary text-white p-3">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Inventario (CSV)</h6>
+                </div>
+                <div class="p-4">
+                    <label class="form-label fw-semibold">Subir listado de alumnos</label>
+                    <input class="form-control mb-2" type="file" name="csvfile" accept=".csv" required>
+                    <div class="p-2 bg-light rounded-3 small text-muted">
+                        <i class="bi bi-info-circle me-1"></i> Formato: Una columna <code>usuario</code> o un nombre por línea.
+                    </div>
+                </div>
+            </div>
+
+            <div class="portal-card shadow-sm">
+                <div class="p-4">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input custom-switch" type="checkbox" name="make_teacher" id="make_teacher">
+                        <label class="form-check-label fw-bold ms-2" for="make_teacher">Crear VM para profesor</label>
+                    </div>
+                    
+                    <div id="teacher_user_wrap" class="mt-3 p-3 bg-light rounded-3 border-dashed" style="display:none;">
+                        <label class="form-label small fw-bold">Usuario del profesor</label>
+                        <input class="form-control form-control-sm" name="teacher_user" placeholder="ej. profesor1">
+                        <p class="x-small text-muted mt-2 mb-0">
+                            Se guardará en la carpeta <strong>Profesores</strong>.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-4">
+                <button class="btn btn-primary w-100 py-3 fw-bold shadow d-flex align-items-center justify-content-center gap-2" type="submit">
+                    <span>Siguiente: Distribuir Hosts</span>
+                    <i class="bi bi-arrow-right"></i>
+                </button>
+                <a class="btn btn-link w-100 mt-2 text-muted text-decoration-none" href="{{ url_for('home') }}">
+                    <i class="bi bi-chevron-left small"></i> Cancelar y volver
+                </a>
+            </div>
+        </div>
+    </form>
+</div>
+
+<style>
+    /* Estilos para el formulario index */
+    .border-dashed {
+        border: 2px dashed #dee2e6 !important;
+    }
+    
+    .x-small {
+        font-size: 0.75rem;
+    }
+
+    .input-group-text {
+        border-color: var(--border);
+        color: var(--text-muted);
+    }
+
+    .custom-switch {
+        width: 2.5em !important;
+        height: 1.25em !important;
+        cursor: pointer;
+    }
+
+    .custom-switch:checked {
+        background-color: var(--red-600) !important;
+        border-color: var(--red-700) !important;
+    }
+
+    /* Resaltar el bloque lateral de CSV */
+    .border-primary-subtle {
+        border: 1px solid rgba(200, 16, 46, 0.2) !important;
+    }
+</style>
+
+<script>
     (function(){
-      const chk = document.getElementById('make_teacher');
-      const wrap = document.getElementById('teacher_user_wrap');
-      function toggle(){ wrap.style.display = chk.checked ? '' : 'none'; }
-      chk.addEventListener('change', toggle); toggle();
+        const chk = document.getElementById('make_teacher');
+        const wrap = document.getElementById('teacher_user_wrap');
+        function toggle(){ 
+            if(chk.checked) {
+                wrap.style.display = 'block';
+                wrap.style.animation = 'fadeIn 0.3s ease';
+            } else {
+                wrap.style.display = 'none';
+            }
+        }
+        chk.addEventListener('change', toggle); 
+        toggle();
     })();
-  </script>
+</script>
 
-  <div class="mt-3">
-    <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
-  </div>
-
-  <div class="col-12">
-    <button class="btn btn-primary w-100" type="submit">Continuar → Distribuir por host</button>
-  </div>
-</form>
 {% endblock %}
-

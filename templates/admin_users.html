@@ -1,116 +1,196 @@
 {% extends "layout.html" %}
 {% block body %}
 
-<h2 class="fw-bold mb-2 text-primary">Admin Usuarios</h2>
-<p class="text-contrast-70 mb-4">
-  Crea usuarios y asigna roles. El rol <strong>admin</strong> ve todo; <strong>profesor</strong> solo Admin Labs (y solo los labs asignados).
-</p>
-
-<div class="row g-3 mb-4">
-  <div class="col-12">
-    <div class="p-3 border rounded-3">
-      <div class="fw-bold mb-2">Crear usuario</div>
-      <form method="post" action="{{ url_for('users_create') }}" class="row g-2">
-        <div class="col-md-3">
-          <input class="form-control" name="username" placeholder="usuario" required>
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3 mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-1">
+                <i class="bi bi-people-fill me-2"></i>Gestión de Usuarios
+            </h2>
+            <p class="text-muted mb-0">Administra los accesos y privilegios del personal docente y técnico.</p>
         </div>
-        <div class="col-md-3">
-          <select class="form-select" name="role" required>
-            <option value="profesor">profesor</option>
-            <option value="admin">admin</option>
-          </select>
+        <div class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 rounded-pill">
+            Total: {{ users|length }} usuarios
         </div>
-        <div class="col-md-3">
-          <input class="form-control" type="password" name="password" placeholder="contraseña" required>
-        </div>
-        <div class="col-md-3">
-          <input class="form-control" type="password" name="password2" placeholder="repetir contraseña" required>
-        </div>
-        <div class="col-12">
-          <button class="btn btn-primary w-100" type="submit">Crear</button>
-        </div>
-      </form>
     </div>
-  </div>
-</div>
 
-<div class="table-responsive">
-  <table class="table align-middle portal-table">
-    <thead>
-      <tr>
-        <th>Usuario</th>
-        <th>Rol</th>
-        <th>Labs</th>
-        <th>Creado</th>
-        <th style="width:520px">Acciones</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for u in users %}
-        {% set labs_assigned = (user_labs.get(u.username, []) if user_labs is defined else []) %}
-        <tr>
-          <td class="fw-medium">{{ u.username }}</td>
-          <td><span class="badge text-bg-light border">{{ u.role }}</span></td>
-
-          <td>
-            {% if u.role == 'profesor' %}
-              <span class="badge badge-portal">{{ labs_assigned|length }}</span>
-              <span class="small text-contrast-70">
-                {% if labs_assigned|length == 0 %}
-                  (sin asignar)
-                {% else %}
-                  {{ (labs_assigned[:2] | join(', ')) }}{% if labs_assigned|length > 2 %}…{% endif %}
-                {% endif %}
-              </span>
-            {% else %}
-              <span class="text-contrast-70 small">—</span>
-            {% endif %}
-          </td>
-
-          <td class="text-contrast-70 small">{{ u.created_at }}</td>
-
-          <td class="d-flex flex-wrap gap-2">
-
-            <form method="post" action="{{ url_for('users_set_role', username=u.username) }}" class="d-flex gap-2">
-              <select class="form-select form-select-sm" name="role" {% if u.username == session.get('username') %}disabled{% endif %}>
-                <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
-                <option value="profesor" {% if u.role == 'profesor' %}selected{% endif %}>profesor</option>
-              </select>
-              <button class="btn btn-outline-primary btn-sm" type="submit"
-                      {% if u.username == session.get('username') %}disabled{% endif %}>
-                Guardar rol
-              </button>
+    <div class="portal-card mb-4 shadow-sm overflow-hidden">
+        <div class="bg-light p-3 border-bottom">
+            <h6 class="mb-0 fw-bold"><i class="bi bi-person-plus-fill me-2 text-primary"></i>Registrar Nuevo Usuario</h6>
+        </div>
+        <div class="p-4">
+            <form method="post" action="{{ url_for('users_create') }}" class="row g-3">
+                <div class="col-md-3">
+                    <div class="form-floating">
+                        <input type="text" class="form-control" name="username" id="new_user" placeholder="usuario" required>
+                        <label for="new_user">Nombre de usuario</label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-floating">
+                        <select class="form-select" name="role" id="new_role" required>
+                            <option value="profesor">Profesor</option>
+                            <option value="admin">Administrador</option>
+                        </select>
+                        <label for="new_role">Rol asignado</label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-floating">
+                        <input type="password" class="form-control" name="password" id="new_pass" placeholder="contraseña" required>
+                        <label for="new_pass">Contraseña</label>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="form-floating">
+                        <input type="password" class="form-control" name="password2" id="new_pass2" placeholder="repetir" required>
+                        <label for="new_pass2">Confirmar contraseña</label>
+                    </div>
+                </div>
+                <div class="col-12 text-end">
+                    <button class="btn btn-primary px-5 py-2 fw-bold shadow-sm" type="submit">
+                        Crear Cuenta <i class="bi bi-plus-lg ms-2"></i>
+                    </button>
+                </div>
             </form>
+        </div>
+    </div>
 
-            {% if u.role == 'profesor' %}
-              <a class="btn btn-outline-primary btn-sm"
-                 href="{{ url_for('users_set_labs', username=u.username) }}">
-                Asignar Labs
-              </a>
-            {% endif %}
+    <div class="portal-card shadow-sm">
+        <div class="table-responsive">
+            <table class="table align-middle portal-table mb-0">
+                <thead>
+                    <tr>
+                        <th class="ps-4">Usuario</th>
+                        <th>Rol</th>
+                        <th>Labs Asignados</th>
+                        <th>Fecha Registro</th>
+                        <th class="text-center">Acciones de Gestión</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    {% set labs_assigned = (user_labs.get(u.username, []) if user_labs is defined else []) %}
+                    <tr>
+                        <td class="ps-4">
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="user-avatar-sm">
+                                    {{ u.username[0] | upper }}
+                                </div>
+                                <span class="fw-bold">{{ u.username }}</span>
+                            </div>
+                        </td>
+                        <td>
+                            <span class="badge {% if u.role == 'admin' %}bg-danger{% else %}bg-secondary{% endif %} rounded-pill px-3">
+                                {{ u.role }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if u.role == 'profesor' %}
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge badge-portal">{{ labs_assigned|length }}</span>
+                                    <small class="text-muted text-truncate" style="max-width: 150px;">
+                                        {% if labs_assigned|length == 0 %}
+                                            <span class="text-danger italic">Sin labs</span>
+                                        {% else %}
+                                            {{ (labs_assigned[:2] | join(', ')) }}{% if labs_assigned|length > 2 %}...{% endif %}
+                                        {% endif %}
+                                    </small>
+                                </div>
+                            {% else %}
+                                <span class="text-muted small italic">Acceso total</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted small">
+                            <i class="bi bi-calendar3 me-1"></i> {{ u.created_at }}
+                        </td>
+                        <td>
+                            <div class="d-flex flex-wrap justify-content-center gap-2">
+                                <form method="post" action="{{ url_for('users_set_role', username=u.username) }}" class="d-flex gap-1">
+                                    <select class="form-select form-select-sm w-auto" name="role" {% if u.username == session.get('username') %}disabled{% endif %}>
+                                        <option value="admin" {% if u.role == 'admin' %}selected{% endif %}>admin</option>
+                                        <option value="profesor" {% if u.role == 'profesor' %}selected{% endif %}>profesor</option>
+                                    </select>
+                                    <button class="btn btn-outline-primary btn-sm" type="submit" title="Guardar Rol"
+                                            {% if u.username == session.get('username') %}disabled{% endif %}>
+                                        <i class="bi bi-check2"></i>
+                                    </button>
+                                </form>
 
-            <a class="btn btn-outline-secondary btn-sm"
-               href="{{ url_for('users_set_password', username=u.username) }}">
-              Cambiar contraseña
-            </a>
+                                {% if u.role == 'profesor' %}
+                                    <a class="btn btn-outline-primary btn-sm" href="{{ url_for('users_set_labs', username=u.username) }}" title="Asignar Labs">
+                                        <i class="bi bi-folder-plus"></i> Labs
+                                    </a>
+                                {% endif %}
 
-            <form method="post" action="{{ url_for('users_delete', username=u.username) }}"
-                  onsubmit="return confirm('¿Eliminar el usuario {{ u.username }}?');">
-              <button class="btn btn-outline-danger btn-sm" type="submit"
-                      {% if u.username == session.get('username') %}disabled{% endif %}>
-                Eliminar
-              </button>
-            </form>
+                                <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('users_set_password', username=u.username) }}" title="Reset Password">
+                                    <i class="bi bi-key"></i>
+                                </a>
 
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+                                <form method="post" action="{{ url_for('users_delete', username=u.username) }}" 
+                                      onsubmit="return confirm('¿Eliminar al usuario {{ u.username }}?');">
+                                    <button class="btn btn-outline-danger btn-sm" type="submit" 
+                                            {% if u.username == session.get('username') %}disabled{% endif %} title="Eliminar">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a class="btn btn-link text-decoration-none text-muted" href="{{ url_for('home') }}">
+            <i class="bi bi-arrow-left me-1"></i> Volver al panel principal
+        </a>
+    </div>
 </div>
 
-<div class="mt-3">
-  <a class="btn btn-outline-primary" href="{{ url_for('home') }}">← Volver</a>
-</div>
+<style>
+    /* Estilos para la tabla de administración */
+    .user-avatar-sm {
+        width: 32px;
+        height: 32px;
+        background-color: #f0f2f5;
+        color: var(--red-600);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 0.85rem;
+        border: 1px solid var(--border);
+    }
+
+    .form-floating > .form-control {
+        height: calc(3.5rem + 2px);
+        line-height: 1.25;
+    }
+
+    .portal-table th {
+        font-size: 0.75rem !important;
+        letter-spacing: 0.5px;
+        padding-top: 15px !important;
+        padding-bottom: 15px !important;
+    }
+
+    .bg-primary-subtle {
+        background-color: #fff5f6 !important;
+    }
+
+    .italic { font-style: italic; }
+
+    /* Ajuste para los selects pequeños en la tabla */
+    .form-select-sm {
+        font-size: 0.75rem;
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+        border-radius: 8px;
+    }
+</style>
 
 {% endblock %}

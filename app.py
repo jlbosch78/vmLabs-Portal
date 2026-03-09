@@ -350,9 +350,10 @@ def clear_user_labs(username: str):
 # ---------------- Plantillas profesores (SQLite) ----------------
 
 def init_teacher_templates_db():
-    """Crea tabla de plantillas publicadas por profesores si no existe."""
+    """Crea/actualiza tabla de plantillas publicadas por profesores (con soporte asíncrono)."""
     conn = db_connect()
     try:
+        # 1. Crear tabla base si no existe
         conn.execute("""
             CREATE TABLE IF NOT EXISTS teacher_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -367,8 +368,21 @@ def init_teacher_templates_db():
                 deleted_by TEXT
             )
         """)
+        
+        # 2. MIGRACIÓN: Añadir columnas para el soporte asíncrono ANTES de los índices
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(teacher_templates)").fetchall()}
+        if "status" not in cols:
+            conn.execute("ALTER TABLE teacher_templates ADD COLUMN status TEXT NOT NULL DEFAULT 'done'")
+        if "job_id" not in cols:
+            conn.execute("ALTER TABLE teacher_templates ADD COLUMN job_id TEXT")
+        if "error" not in cols:
+            conn.execute("ALTER TABLE teacher_templates ADD COLUMN error TEXT")
+
+        # 3. Crear índices
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_user_lab ON teacher_templates(vcenter_id, username, lab_name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_name ON teacher_templates(vcenter_id, template_name)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_status ON teacher_templates(vcenter_id, status)")
+        
         conn.commit()
     finally:
         conn.close()
@@ -378,7 +392,11 @@ def _tt_active_count(vcenter_id: str, username: str, lab_name: str) -> int:
     conn = db_connect()
     try:
         row = conn.execute(
-            "SELECT COUNT(*) AS n FROM teacher_templates WHERE vcenter_id=? AND username=? AND lab_name=? AND deleted_at IS NULL",
+            """SELECT COUNT(*) AS n 
+               FROM teacher_templates 
+               WHERE vcenter_id=? AND username=? AND lab_name=? 
+                 AND deleted_at IS NULL 
+                 AND (status IS NULL OR status != 'error')""",
             (vcenter_id, username, lab_name)
         ).fetchone()
         return int(row["n"]) if row else 0
@@ -390,7 +408,7 @@ def _tt_list_for_user_lab(vcenter_id: str, username: str, lab_name: str):
     conn = db_connect()
     try:
         return conn.execute(
-            """SELECT id, template_name, template_moid, created_at
+            """SELECT id, template_name, template_moid, created_at, status, job_id, error
                FROM teacher_templates
                WHERE vcenter_id=? AND username=? AND lab_name=? AND deleted_at IS NULL
                ORDER BY created_at DESC, id DESC""",
@@ -404,7 +422,7 @@ def _tt_list_all(vcenter_id: str):
     conn = db_connect()
     try:
         return conn.execute(
-            """SELECT id, username, lab_name, template_name, template_moid, created_at
+            """SELECT id, username, lab_name, template_name, template_moid, created_at, status, job_id
                FROM teacher_templates
                WHERE vcenter_id=? AND deleted_at IS NULL
                ORDER BY created_at DESC, id DESC""",
@@ -413,6 +431,36 @@ def _tt_list_all(vcenter_id: str):
     finally:
         conn.close()
 
+def _tt_insert_running(vcenter_id: str, username: str, lab_name: str, template_name: str, created_by: str, job_id: str) -> int:
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """INSERT INTO teacher_templates
+               (vcenter_id, username, lab_name, template_name, template_moid, created_at, created_by, status, job_id)
+               VALUES (?, ?, ?, ?, NULL, ?, ?, 'running', ?)""",
+            (vcenter_id, username, lab_name, template_name, now, created_by, job_id)
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+def _tt_mark_done(template_id: int, template_moid: str | None):
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE teacher_templates SET status='done', template_moid=?, error=NULL WHERE id=?", (template_moid, template_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+def _tt_mark_error(template_id: int, error_msg: str):
+    conn = db_connect()
+    try:
+        conn.execute("UPDATE teacher_templates SET status='error', error=? WHERE id=?", (error_msg[:500], template_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 def _tt_get(vcenter_id: str, template_id: int):
     conn = db_connect()
@@ -425,25 +473,11 @@ def _tt_get(vcenter_id: str, template_id: int):
         conn.close()
 
 
-def _tt_insert(vcenter_id: str, username: str, lab_name: str, template_name: str, template_moid: str | None, created_by: str):
-    conn = db_connect()
-    try:
-        conn.execute(
-            """INSERT INTO teacher_templates
-               (vcenter_id, username, lab_name, template_name, template_moid, created_at, created_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (vcenter_id, username, lab_name, template_name, template_moid, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), created_by)
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def _tt_mark_deleted(vcenter_id: str, template_id: int, deleted_by: str):
     conn = db_connect()
     try:
         conn.execute(
-            "UPDATE teacher_templates SET deleted_at=?, deleted_by=? WHERE vcenter_id=? AND id=?",
+            "UPDATE teacher_templates SET deleted_at=?, deleted_by=?, status='deleted' WHERE vcenter_id=? AND id=?",
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, vcenter_id, template_id)
         )
         conn.commit()
@@ -569,6 +603,62 @@ def _delete_template_in_vcenter(content, template_moid: str | None, template_nam
     except Exception as e:
         return False, str(e)
 
+
+# --------- Thread para creación de plantillas asíncrona ---------
+def _publish_teacher_template_job(vcenter_id: str, job_id: str, template_row_id: int, username: str, lab_name: str, tmpl_name: str):
+    try:
+        job_logger_put(job_id, f"[START] Iniciando publicación de plantilla '{tmpl_name}' para el lab '{lab_name}'")
+
+        with vcenter_ctx(vcenter_id) as (_, content):
+            vm = _find_teacher_vm(content, lab_name, username)
+            if not vm:
+                raise RuntimeError("No se encontró la VM del profesor en la carpeta 'Profesores'.")
+
+            job_logger_put(job_id, f"[1] VM encontrada: {vm.name}. Procediendo a apagarla de forma segura...")
+            ok, msg = _soft_poweroff_vm(vm)
+            if not ok:
+                job_logger_put(job_id, f"[WARN] Dificultades apagando VM: {msg}")
+
+            job_logger_put(job_id, f"[2] Preparando carpeta destino en vCenter: {TEACHER_TEMPLATES_ROOT}/{username}")
+            dest_folder = _ensure_teacher_templates_folder(content, username)
+
+            reloc = vim.vm.RelocateSpec()
+            # Intentar rellenar con el entorno de la VM actual para asegurar que no rechace el CloneSpec
+            try:
+                if getattr(vm, "resourcePool", None): reloc.pool = vm.resourcePool
+                if getattr(vm, "datastore", None): reloc.datastore = vm.datastore[0]
+                if getattr(getattr(vm, "runtime", None), "host", None): reloc.host = vm.runtime.host
+            except Exception:
+                pass
+
+            spec = vim.vm.CloneSpec(location=reloc, powerOn=False, template=True)
+
+            job_logger_put(job_id, "[3] Instruyendo a vCenter para iniciar el clonado como TEMPLATE...")
+            task = vm.Clone(folder=dest_folder, name=tmpl_name, spec=spec)
+
+            while True:
+                info = task.info
+                if info.state == vim.TaskInfo.State.success:
+                    tmpl_obj = getattr(info, "result", None)
+                    moid = getattr(tmpl_obj, "_moId", None) if tmpl_obj else None
+                    job_logger_put(job_id, f"[OK] Plantilla generada correctamente en vCenter. (MoID: {moid or 'N/A'})")
+                    _tt_mark_done(template_row_id, moid)
+                    jobs[job_id]["status"] = "done"
+                    break
+                elif info.state == vim.TaskInfo.State.error:
+                    err_msg = getattr(info.error, "msg", str(info.error)) if info.error else "Error interno de vCenter"
+                    raise RuntimeError(err_msg)
+                
+                time.sleep(2)
+
+        job_logger_put(job_id, "[END] Proceso finalizado. Puedes volver a 'Mis plantillas'.")
+
+    except Exception as e:
+        err = str(e)
+        job_logger_put(job_id, f"[ERROR] Ocurrió un fallo: {err}")
+        job_logger_put(job_id, "[END] Proceso abortado con errores.")
+        _tt_mark_error(template_row_id, err)
+        jobs[job_id]["status"] = "error"
 
 
 # ---------------- Auth / roles ----------------
@@ -1310,6 +1400,7 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
 def home():
     return render_template("home.html")
 
+
 @app.route("/create")
 @login_required
 @role_required("admin")
@@ -1450,7 +1541,15 @@ def my_templates():
 
             rows = _tt_list_for_user_lab(vcid, username, lab_name)
             templates_by_lab[lab_name] = [
-                {"id": r["id"], "name": r["template_name"], "moid": r["template_moid"], "created_at": r["created_at"]}
+                {
+                    "id": r["id"], 
+                    "name": r["template_name"], 
+                    "moid": r["template_moid"], 
+                    "created_at": r["created_at"],
+                    "status": r["status"] if "status" in r.keys() else "done",
+                    "job_id": r["job_id"] if "job_id" in r.keys() else "",
+                    "error": r["error"] if "error" in r.keys() else ""
+                }
                 for r in rows
             ]
 
@@ -1491,55 +1590,59 @@ def my_templates_publish():
         flash(f"Has alcanzado el máximo de {MAX_TEMPLATES_PER_LAB} plantillas para este lab.", "warning")
         return redirect(url_for("my_templates"))
 
-    with vcenter_ctx(vcid) as (_, content):
-        vm = _find_teacher_vm(content, lab_name, username)
-        if not vm:
-            flash(f"No se encontró tu VM de profesor en '{TEACHERS_FOLDER}'. Esperada: {lab_name}-{username}", "danger")
-            return redirect(url_for("my_templates"))
-
-        ok, msg = _soft_poweroff_vm(vm)
-        if not ok:
-            flash(f"No se pudo apagar la VM antes de clonar: {msg}", "danger")
-            return redirect(url_for("my_templates"))
-
-        # Slot 1..MAX libre
-        existing = _tt_list_for_user_lab(vcid, username, lab_name)
-        used = set()
-        for r in existing:
-            m = re.search(r"-([1-9]\d*)$", r["template_name"] or "")
-            if m:
-                used.add(int(m.group(1)))
-        slot = None
-        for i in range(1, MAX_TEMPLATES_PER_LAB + 1):
-            if i not in used:
-                slot = i
-                break
-        if slot is None:
-            flash(f"Has alcanzado el máximo de {MAX_TEMPLATES_PER_LAB} plantillas para este lab.", "warning")
-            return redirect(url_for("my_templates"))
-
-        base = _sanitize_name(_strip_lab_prefix(lab_name))
-        tmpl_name = _sanitize_name(f"{TEACHER_TEMPLATE_PREFIX}-{base}-{username}-{slot}")
-
-        dest_folder = _ensure_teacher_templates_folder(content, username)
-
-        try:
-            relocate_spec = vim.vm.RelocateSpec()
-            spec = vim.vm.CloneSpec(location=relocate_spec, powerOn=False, template=True)
-            task = vm.Clone(folder=dest_folder, name=tmpl_name, spec=spec)
-            ok, err = _wait_task(task, timeout_sec=3600)
-            if not ok:
-                flash(f"Error clonando plantilla: {err}", "danger")
+    try:
+        with vcenter_ctx(vcid) as (_, content):
+            vm = _find_teacher_vm(content, lab_name, username)
+            if not vm:
+                flash(f"No se encontró tu VM de profesor en '{TEACHERS_FOLDER}'. Esperada: {lab_name}-{username}", "danger")
                 return redirect(url_for("my_templates"))
-            tmpl_obj = getattr(task.info, "result", None)
-            tmpl_moid = getattr(tmpl_obj, "_moId", None) if tmpl_obj else None
-        except Exception as e:
-            flash(f"Error clonando plantilla: {e}", "danger")
-            return redirect(url_for("my_templates"))
+    except Exception as e:
+        flash(f"Error conectando a vCenter: {e}", "danger")
+        return redirect(url_for("my_templates"))
 
-    _tt_insert(vcid, username, lab_name, tmpl_name, tmpl_moid, created_by=username)
-    flash(f"Plantilla publicada: {tmpl_name}", "success")
-    return redirect(url_for("my_templates"))
+    existing = _tt_list_for_user_lab(vcid, username, lab_name)
+    used = set()
+    for r in existing:
+        st = r["status"] if "status" in r.keys() else "done"
+        if st == "error": continue
+        m = re.search(r"-([1-9]\d*)$", r["template_name"] or "")
+        if m:
+            used.add(int(m.group(1)))
+    
+    slot = None
+    for i in range(1, MAX_TEMPLATES_PER_LAB + 1):
+        if i not in used:
+            slot = i
+            break
+    
+    if slot is None:
+        flash(f"Has alcanzado el máximo de {MAX_TEMPLATES_PER_LAB} plantillas activas para este lab.", "warning")
+        return redirect(url_for("my_templates"))
+
+    base = _sanitize_name(_strip_lab_prefix(lab_name))
+    tmpl_name = _sanitize_name(f"{TEACHER_TEMPLATE_PREFIX}-{base}-{username}-{slot}")
+
+    # Configuración del Job Asíncrono
+    job_id = str(uuid.uuid4())[:8]
+    q = Queue()
+    jobs[job_id] = {"status": "running", "queue": q, "created_at": datetime.now().isoformat(timespec="seconds")}
+
+    try:
+        template_row_id = _tt_insert_running(vcid, username, lab_name, tmpl_name, created_by=username, job_id=job_id)
+    except Exception as e:
+        flash(f"Error en base de datos al registrar plantilla: {e}", "danger")
+        return redirect(url_for("my_templates"))
+
+    t = threading.Thread(
+        target=_publish_teacher_template_job,
+        args=(vcid, job_id, template_row_id, username, lab_name, tmpl_name),
+        daemon=True
+    )
+    jobs[job_id]["thread"] = t
+    t.start()
+
+    flash("Plantilla en creación. Serás redirigido cuando el proceso acabe o puedes usar el botón volver.", "info")
+    return redirect(url_for("job_page", job_id=job_id))
 
 
 @app.post("/my-templates/delete")
@@ -1565,6 +1668,11 @@ def my_templates_delete():
         return redirect(url_for("my_templates"))
     if row["username"] != username:
         flash("No tienes permisos para eliminar esta plantilla.", "danger")
+        return redirect(url_for("my_templates"))
+
+    st = (row["status"] if "status" in row.keys() else "done").lower()
+    if st == "running":
+        flash("La plantilla está en creación. Espera a que termine el trabajo antes de eliminarla.", "warning")
         return redirect(url_for("my_templates"))
 
     with vcenter_ctx(vcid) as (_, content):
@@ -3093,45 +3201,80 @@ def _upsert_schedule(form, username: str):
     off_days = form.getlist("off_days") if enable_off else []
     
 def _norm_hhmm(t: str) -> str:
+    """
+    Normaliza horas a formato HH:MM. 
+    Maneja variaciones de navegadores (HH:MM o HH:MM:SS).
+    """
     t = (t or "").strip()
-    # Acepta HH:MM o HH:MM:SS -> guarda HH:MM
-    return t[:5] if len(t) >= 5 else t
+    if not t:
+        return ""
+    # Si viene como HH:MM:SS, recortamos a HH:MM
+    if len(t) >= 5 and t[2] == ":":
+        return t[:5]
+    
+    try:
+        parts = t.split(":")
+        if len(parts) >= 2:
+            hh = int(parts[0])
+            mm = int(parts[1])
+            return f"{hh:02d}:{mm:02d}"
+    except Exception:
+        pass
+    return t
 
+
+def _upsert_schedule(form, username: str):
+    """
+    Valida y guarda (Insert o Update) la regla en la base de datos.
+    """
+    sched_id = (form.get("id") or "").strip()
+    name = (form.get("name") or "").strip()
+    scope = (form.get("scope") or "all").strip()
+    enabled = 1 if (form.get("enabled") == "on") else 0
+
+    # Permitir reglas de solo Encendido, solo Apagado o ambos
+    enable_on = (form.get("enable_on") == "on")
+    enable_off = (form.get("enable_off") == "on")
+
+    on_days = form.getlist("on_days") if enable_on else []
+    off_days = form.getlist("off_days") if enable_off else []
     on_time = _norm_hhmm(form.get("on_time")) if enable_on else ""
     off_time = _norm_hhmm(form.get("off_time")) if enable_off else ""
+
     fallback_minutes = int(form.get("fallback_minutes") or "10")
 
     labs = form.getlist("labs")
     labs_json = json.dumps(labs, ensure_ascii=False)
 
+    # Validaciones de Seguridad
     if scope not in ("all", "selected"):
-        raise ValueError("scope inválido")
+        raise ValueError("Scope de laboratorio inválido.")
 
-    # NUEVO: Confirmación fuerte si scope=all
     if scope == "all":
         confirm_all = (form.get("confirm_all") or "").strip().upper()
         if confirm_all != "TODOS":
-            raise ValueError("Para aplicar a TODOS los labs debes confirmar escribiendo: TODOS")
+            raise ValueError("Confirmación requerida para afectar a TODOS los labs.")
 
-    # Al menos uno activo
     if not enable_on and not enable_off:
-        raise ValueError("Debes activar al menos Encendido u Apagado.")
+        raise ValueError("Debes activar al menos la opción de Encendido o la de Apagado.")
 
-    # Validación específica por bloque
     if enable_on and (not on_days or not on_time):
-        raise ValueError("Encendido activo: selecciona días y hora ON.")
+        raise ValueError("Has activado Encendido: selecciona al menos un día y hora.")
+    
     if enable_off and (not off_days or not off_time):
-        raise ValueError("Apagado activo: selecciona días y hora OFF.")
+        raise ValueError("Has activado Apagado: selecciona al menos un día y hora.")
 
     if scope == "selected" and not labs:
-        raise ValueError("Si seleccionas 'Seleccionar labs', debes elegir al menos uno.")
+        raise ValueError("Has marcado 'Seleccionar labs', pero no has elegido ninguno de la lista.")
 
+    # Preparar datos para DB
     vcid, _cfg = get_vcenter_cfg()
     now = datetime.now().isoformat(timespec="seconds")
 
     conn = db_connect()
     try:
         if sched_id:
+            # ACTUALIZAR REGLA EXISTENTE
             conn.execute("""
                 UPDATE schedules SET
                     name=?, scope=?, labs_json=?,
@@ -3148,6 +3291,7 @@ def _norm_hhmm(t: str) -> str:
                 now, int(sched_id), vcid
             ))
         else:
+            # INSERTAR NUEVA REGLA
             conn.execute("""
                 INSERT INTO schedules
                 (vcenter_id, name, scope, labs_json, on_days, on_time, off_days, off_time,
@@ -3163,7 +3307,6 @@ def _norm_hhmm(t: str) -> str:
         conn.commit()
     finally:
         conn.close()
-
 
 def _toggle_schedule(sched_id: int, vcenter_id=None):
     vcid, _cfg = get_vcenter_cfg(vcenter_id)
