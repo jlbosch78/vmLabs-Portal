@@ -27,7 +27,7 @@ Portal web (Flask) para administrar laboratorios (carpetas) y máquinas virtuale
 ![Panel principal - vCenter seleccionado](docs/images/3.png)
 
 ### Crear laboratorio (Paso 1)
-![Crear laboratorio - Paso 1](docs/images/4.png)
+![Crear laboratorio - Paso 1](docs/images/4a.png)
 
 ### Distribución por host (Paso 2)
 ![Distribución por host - Paso 2](docs/images/5.png)
@@ -46,6 +46,24 @@ Portal web (Flask) para administrar laboratorios (carpetas) y máquinas virtuale
 
 ### Detalle de laboratorio (acciones por VM)
 ![Detalle de laboratorio](docs/images/6.png)
+
+
+### Login como Profesor ()
+![Login como Profesor](docs/images/2a.png)
+
+### Vista de Plantillas ()
+![Vista de Plantillas](docs/images/2b.png)
+
+### Explorador de Labs ()
+![Explorador de Labs](docs/images/5b.png)
+
+### Borrado de Lab ()
+![Borrado de Lab](docs/images/7a.png)
+
+### Cambio de password ()
+![Cambio de password](docs/images/9a.png)
+
+
 
 </details>
 
