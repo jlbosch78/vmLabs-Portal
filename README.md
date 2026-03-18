@@ -203,10 +203,11 @@ Flujo típico:
 3) El progreso se muestra en tiempo real (SSE `/stream/<job_id>`).
 
 Detalles:
+- Los "templates" se buscan dentro de una carpeta "Plantillas" en el vcenter. Con lo cual asegurate de tenerla creada y con las plantillas dentro.
 - Nombres de VM: `<folder_name>-<username>`
 - La NIC se reconfigura a la red/portgroup seleccionada.
 - Snapshot baseline opcional tras clonar.
-- VM opcional “profesor” clonada en carpeta `Profesores`.
+- VM opcional “profesor” clonada en carpeta `Profesores` (si no está creada, la crea).
 
 ---
 
