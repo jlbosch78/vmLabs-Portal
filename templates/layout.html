@@ -80,7 +80,8 @@
                 {% if vc_ready %}
                   <li><a class="dropdown-item" href="{{ url_for('create_lab') }}">Crear Labs</a></li>
                   <li><a class="dropdown-item" href="{{ url_for('schedule_page') }}">Programar Inicio/Apagado</a></li>
-                  <li><a class="dropdown-item" href="{{ url_for('teacher_templates_admin') }}">Plantillas profesores</a></li>
+                  <li><a class="dropdown-item" href="{{ url_for('teacher_templates_admin') }}">Plantillas profesores</a></li> 
+                  <li><a class="dropdown-item" href="{{ url_for('dashboard') }}"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a></li>
                 {% else %}
                   <li><span class="dropdown-item disabled">Crear Labs (elige vCenter)</span></li>
                   <li><span class="dropdown-item disabled">Programar Inicio/Apagado (elige vCenter)</span></li>
@@ -103,10 +104,10 @@
   </nav>
 
   <main class="container my-4">
-    {# Sección de Mensajes Flash #}
+    {# Sección de Mensajes Flash - Ahora convertidos a toasts, pero mantenemos por si acaso #}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div class="mb-3">
+        <div class="mb-3 d-none">
           {% for cat, msg in messages %}
             <div class="alert alert-{{cat}} shadow-sm mb-2">{{ msg|safe }}</div>
           {% endfor %}
@@ -129,5 +130,27 @@
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='notifications.js') }}"></script>
+  
+  <script>
+    // Capturar mensajes flash de Flask y convertirlos en toasts
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          setTimeout(function() {
+            {% if category == 'success' %}
+              window.notify.success('{{ message|safe }}');
+            {% elif category == 'danger' %}
+              window.notify.error('{{ message|safe }}');
+            {% elif category == 'warning' %}
+              window.notify.warning('{{ message|safe }}');
+            {% else %}
+              window.notify.info('{{ message|safe }}');
+            {% endif %}
+          }, 100);
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+  </script>
 </body>
 </html>

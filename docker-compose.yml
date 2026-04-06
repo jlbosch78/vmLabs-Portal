@@ -6,6 +6,7 @@ services:
       - "5000:5000"
     environment:
       - TZ=${TZ}
+      - PYTHONUNBUFFERED=1
     volumes:
       - ./data:/data
       - ./tmp:/tmp/vclab_jobs
@@ -17,13 +18,23 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-    command: sh -c "gunicorn -b 0.0.0.0:${FLASK_PORT:-5000} --workers 1 --threads 12 --timeout 300 --graceful-timeout 30 --keep-alive 5 app:app"
+    command: sh -c "gunicorn -b 0.0.0.0:${FLASK_PORT:-5000} --workers 1 --threads 12 --timeout 300 --graceful-timeout 30 --keep-alive 5 --access-logfile - --error-logfile - app:app"
+    healthcheck:
+      # Usar wget que suele venir en imagenes slim (o usar python)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/static/app.css').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - vmlabs-network
 
   scheduler:
     build: .
     env_file: .env
     environment:
       - TZ=${TZ}
+      - PYTHONUNBUFFERED=1
     volumes:
       - ./data:/data
       - ./tmp:/tmp/vclab_jobs
@@ -36,3 +47,11 @@ services:
         max-size: "10m"
         max-file: "5"
     command: sh -c "python scheduler.py"
+    depends_on:
+      - web
+    networks:
+      - vmlabs-network
+
+networks:
+  vmlabs-network:
+    driver: bridge

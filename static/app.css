@@ -256,7 +256,84 @@
 .btn-outline-primary:focus:active{
   box-shadow: 0 0 0 .25rem rgba(25, 135, 84, .28) !important;
 }
+/* Estilos para notificaciones toast - AÑADIR AL FINAL DEL ARCHIVO */
 
+.toast-container {
+    z-index: 1090;
+}
+
+.toast {
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+    min-width: 280px;
+    max-width: 400px;
+}
+
+.toast:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+}
+
+.toast-header {
+    background: rgba(255, 255, 255, 0.95);
+    border-bottom: none;
+}
+
+.toast-header i {
+    font-size: 1.2rem;
+}
+
+.toast-body {
+    background: white;
+    padding: 0.75rem 1rem;
+    color: var(--text);
+}
+
+/* Diferentes estilos por tipo */
+.toast.border-success {
+    border-left: 4px solid var(--green-600) !important;
+}
+
+.toast.border-danger {
+    border-left: 4px solid #dc3545 !important;
+}
+
+.toast.border-warning {
+    border-left: 4px solid #ffc107 !important;
+}
+
+.toast.border-info {
+    border-left: 4px solid #0dcaf0 !important;
+}
+
+/* Animación de entrada */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.toast.show {
+    animation: slideInRight 0.3s ease forwards;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .toast-container {
+        bottom: 0.5rem;
+        right: 0.5rem;
+        left: 0.5rem;
+    }
+    .toast {
+        max-width: calc(100% - 1rem);
+        margin: 0 auto;
+    }
+}
 
 
 

@@ -15,7 +15,7 @@
                         <i class="bi bi-play-circle me-2 text-muted"></i>Encender
                     </button>
                 {% else %}
-                    <form method="post" action="{{ url_for('vm_power_on') }}">
+                    <form method="post" action="{{ url_for('vm_power_on') }}" class="vm-action-form" data-vm-name="{{ item.name }}">
                         <input type="hidden" name="moid" value="{{ item.moid }}">
                         <input type="hidden" name="lab_name" value="{{ lab_name }}">
                         <button class="dropdown-item js-action-on" type="submit">
@@ -30,7 +30,7 @@
                         <i class="bi bi-power me-2 text-muted"></i>Apagar
                     </button>
                 {% else %}
-                    <form method="post" action="{{ url_for('vm_power_off') }}" onsubmit="return confirm('¿Apagar VM {{ item.name }}?');">
+                    <form method="post" action="{{ url_for('vm_power_off') }}" class="vm-action-form" data-vm-name="{{ item.name }}" onsubmit="return confirm('¿Apagar VM {{ item.name }}?');">
                         <input type="hidden" name="moid" value="{{ item.moid }}">
                         <input type="hidden" name="lab_name" value="{{ lab_name }}">
                         <button class="dropdown-item js-action-off" type="submit">
@@ -45,7 +45,7 @@
                         <i class="bi bi-arrow-clockwise me-2 text-muted"></i>Reiniciar
                     </button>
                 {% else %}
-                    <form method="post" action="{{ url_for('vm_power_reboot') }}" onsubmit="return confirm('¿Reiniciar VM {{ item.name }}?');">
+                    <form method="post" action="{{ url_for('vm_power_reboot') }}" class="vm-action-form" data-vm-name="{{ item.name }}" onsubmit="return confirm('¿Reiniciar VM {{ item.name }}?');">
                         <input type="hidden" name="moid" value="{{ item.moid }}">
                         <input type="hidden" name="lab_name" value="{{ lab_name }}">
                         <button class="dropdown-item js-action-reboot" type="submit">
@@ -63,7 +63,7 @@
         </button>
         <ul class="dropdown-menu shadow-sm border">
             <li>
-                <form method="post" action="{{ url_for('vm_snapshot_create') }}" onsubmit="return confirm('¿Crear snapshot de {{ item.name }}?');">
+                <form method="post" action="{{ url_for('vm_snapshot_create') }}" class="vm-action-form" data-vm-name="{{ item.name }}" onsubmit="return confirm('¿Crear snapshot de {{ item.name }}?');">
                     <input type="hidden" name="moid" value="{{ item.moid }}">
                     <input type="hidden" name="lab_name" value="{{ lab_name }}">
                     <button class="dropdown-item js-snap-create" type="submit">
@@ -73,7 +73,7 @@
             </li>
             <li>
                 {% if item.snapshot_count and item.snapshot_count > 0 %}
-                <form method="post" action="{{ url_for('vm_snapshot_delete_last') }}" onsubmit="return confirmDeleteSnapshot('{{ item.name|e }}', this);">
+                <form method="post" action="{{ url_for('vm_snapshot_delete_last') }}" class="vm-action-form" data-vm-name="{{ item.name }}" onsubmit="return confirmDeleteSnapshot('{{ item.name|e }}', this);">
                     <input type="hidden" name="moid" value="{{ item.moid }}">
                     <input type="hidden" name="lab_name" value="{{ lab_name }}">
                     <input type="hidden" name="confirm" value="">
@@ -103,7 +103,7 @@
             <li><hr class="dropdown-divider"></li>
             <li>
                 {% if item.has_snapshot or (item.snapshot_count and item.snapshot_count > 0) %}
-                <form method="post" action="{{ url_for('vm_recreate') }}" onsubmit="return confirmRecreate('{{ item.name|e }}', this);">
+                <form method="post" action="{{ url_for('vm_recreate') }}" class="vm-action-form" data-vm-name="{{ item.name }}" onsubmit="return confirmRecreate('{{ item.name|e }}', this);">
                     <input type="hidden" name="moid" value="{{ item.moid }}">
                     <input type="hidden" name="lab_name" value="{{ lab_name }}">
                     <input type="hidden" name="confirm" value="">
@@ -118,7 +118,7 @@
                 {% endif %}
             </li>
             <li>
-                <form method="post" action="{{ url_for('vm_delete') }}" onsubmit="return confirmDeleteVM('{{ item.name|e }}', this);">
+                <form method="post" action="{{ url_for('vm_delete') }}" class="vm-action-form" data-vm-name="{{ item.name }}" onsubmit="return confirmDeleteVM('{{ item.name|e }}', this);">
                     <input type="hidden" name="moid" value="{{ item.moid }}">
                     <input type="hidden" name="lab_name" value="{{ lab_name }}">
                     <input type="hidden" name="confirm" value="">
@@ -198,6 +198,7 @@
                             <tr>
                                 <th class="ps-4" style="width: 180px;">Estado</th>
                                 <th>Máquina</th>
+                                <th>Dirección IP</th>
                                 <th class="text-end pe-4">Acciones</th>
                             </tr>
                         </thead>
@@ -214,6 +215,26 @@
                                     </span>
                                 </td>
                                 <td class="fw-medium">{{ tvm.name }}</td>
+                                <td>
+                                    {% if tvm.ips and tvm.ips|length > 0 %}
+                                        {% if tvm.ips|length > 1 %}
+                                            <div class="dropdown">
+                                                <button class="btn btn-outline-secondary btn-sm dropdown-toggle py-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    Ver IPs ({{ tvm.ips|length }})
+                                                </button>
+                                                <ul class="dropdown-menu shadow-sm border">
+                                                    {% for ip in tvm.ips %}
+                                                        <li><span class="dropdown-item-text small"><code>{{ ip }}</code></span></li>
+                                                    {% endfor %}
+                                                </ul>
+                                            </div>
+                                        {% else %}
+                                            <span class="small text-muted"><code>{{ tvm.ips[0] }}</code></span>
+                                        {% endif %}
+                                    {% else %}
+                                        <span class="small text-muted fst-italic">Sin IP</span>
+                                    {% endif %}
+                                </td>
                                 <td class="text-end pe-4 actions" data-power="{{ tvm.power|e }}">
                                     {{ render_vm_actions(tvm) }}
                                 </td>
@@ -237,6 +258,7 @@
                         <tr>
                             <th class="ps-4" style="width: 180px;">Estado</th>
                             <th>Máquina</th>
+                            <th>Dirección IP</th>
                             <th class="text-end pe-4">Acciones</th>
                         </tr>
                     </thead>
@@ -253,6 +275,26 @@
                                 </span>
                             </td>
                             <td class="fw-medium">{{ vm.name }}</td>
+                            <td>
+                                {% if vm.ips and vm.ips|length > 0 %}
+                                    {% if vm.ips|length > 1 %}
+                                        <div class="dropdown">
+                                            <button class="btn btn-outline-secondary btn-sm dropdown-toggle py-0" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                Ver IPs ({{ vm.ips|length }})
+                                            </button>
+                                            <ul class="dropdown-menu shadow-sm border">
+                                                {% for ip in vm.ips %}
+                                                    <li><span class="dropdown-item-text small"><code>{{ ip }}</code></span></li>
+                                                {% endfor %}
+                                            </ul>
+                                        </div>
+                                    {% else %}
+                                        <span class="small text-muted"><code>{{ vm.ips[0] }}</code></span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="small text-muted fst-italic">Sin IP</span>
+                                {% endif %}
+                            </td>
                             <td class="text-end pe-4 actions" data-power="{{ vm.power|e }}">
                                 {{ render_vm_actions(vm) }}
                             </td>
@@ -269,7 +311,7 @@
     /* Fix para evitar cortes en tablas responsivas con dropdowns */
     .table-responsive {
         overflow: visible !important;
-        padding-bottom: 60px; /* Buffer para el último elemento */
+        padding-bottom: 60px;
     }
 
     .dropdown-menu {
@@ -346,7 +388,6 @@
         
         row.querySelector(".actions")?.setAttribute("data-power", power);
         
-        // Habilitar/Deshabilitar botones dinámicamente
         const canOn = (power !== "poweredOn");
         const canOff = (power !== "poweredOff");
         const canReboot = (power === "poweredOn");
@@ -360,6 +401,7 @@
         const prev = btn.innerHTML;
         btn.disabled = true; 
         btn.innerHTML = '<span class="mini-spin"></span> Cargando...';
+        window.notify.info('Actualizando estados de VMs...', 'Info', 1500);
         
         const rows = document.querySelectorAll("tr[data-moid]");
         for (const row of rows) {
@@ -374,6 +416,7 @@
         }
         btn.innerHTML = prev; 
         btn.disabled = false;
+        window.notify.success('Estados actualizados correctamente', 'Completado', 2000);
     }
 
     document.getElementById("refreshStatesBtn").addEventListener("click", refreshAllStates);
@@ -397,6 +440,15 @@
         document.getElementById("vmFilterInput").value = "";
         document.getElementById("powerFilter").value = "all";
         applyVmFilter();
+    });
+
+    // --- Notificaciones en tiempo real para acciones de VM ---
+    document.querySelectorAll('.vm-action-form').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            const vmName = this.dataset.vmName || 'VM';
+            const action = this.querySelector('button')?.innerText?.trim() || 'acción';
+            window.notify.info(`Solicitando ${action.toLowerCase()} para ${vmName}...`, 'Procesando', 2000);
+        });
     });
 </script>
 {% endblock %}

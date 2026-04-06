@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-# vCenter Lab Creator con distribución por host + login simple + UI moderna (dark)
-# OPTIMIZADO: ctx manager vCenter, caché TTL inventario, menos duplicación, clon más eficiente
+# vCenter Lab Creator con distribución por host + login simple + UI moderna
+# VERSIÓN MEJORADA: logging centralizado, manejo de errores, separación de responsabilidades
+# CON NOTIFICACIONES EN TIEMPO REAL (SSE)
 
 import os
 import ssl
@@ -11,20 +12,29 @@ import threading
 import sqlite3
 import json
 import re
+import logging
 from contextlib import contextmanager
 from functools import wraps
 from queue import Queue, Empty
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any, Tuple
 
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import (
-Flask, render_template, request, redirect, url_for,
+    Flask, render_template, request, redirect, url_for,
     Response, jsonify, session, flash,
     has_request_context
 )
 from pyVim import connect
 from pyVmomi import vim
 from dotenv import load_dotenv
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -111,7 +121,7 @@ def get_active_vcenter_id():
         return DEFAULT_VCENTER
 
     if session.get("role") == "admin":
-        return session.get("vcenter_id")  # puede ser None si aún no eligió
+        return session.get("vcenter_id")
 
     return session.get("vcenter_id") or PROF_VCENTER
 
@@ -139,28 +149,23 @@ os.makedirs(TMP_DIR, exist_ok=True)
 
 LAB_FOLDER_PREFIX = os.getenv("LAB_FOLDER_PREFIX", "Lab - ")
 
-
 TEACHERS_FOLDER = os.getenv("TEACHERS_FOLDER", "Profesores")
 TEACHER_TEMPLATES_ROOT = os.getenv("TEMPLATES_PROF_ROOT", "Templates Profesores")
 TEACHER_TEMPLATE_PREFIX = os.getenv("TEACHER_TEMPLATE_PREFIX", "Plantilla")
 MAX_TEMPLATES_PER_LAB = _env_int("MAX_TEMPLATES_PER_LAB", 3)
 
-
 SOFT_SHUTDOWN_TIMEOUT_SEC = _env_int("SOFT_SHUTDOWN_TIMEOUT_SEC", 60)
 SOFT_SHUTDOWN_FALLBACK_HARD = _env_bool("SOFT_SHUTDOWN_FALLBACK_HARD", True)
-
 SOFT_REBOOT_FALLBACK_RESET = _env_bool("SOFT_REBOOT_FALLBACK_RESET", True)
-
 POLL_INTERVAL_MS = _env_int("POLL_INTERVAL_MS", 2500)
 
-# Cachés (reduce llamadas pesadas a vCenter)
+# Cachés
 INVENTORY_CACHE_TTL_SEC = _env_int("INVENTORY_CACHE_TTL_SEC", 60)
 LABS_CACHE_TTL_SEC = _env_int("LABS_CACHE_TTL_SEC", 30)
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET
 
-# Hardening cookies (no rompe nada si estás detrás de HTTPS)
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE=os.getenv("SESSION_COOKIE_SAMESITE", "Lax"),
@@ -168,7 +173,28 @@ app.config.update(
 
 jobs = {}
 
-# ---------------- Cache TTL simple ----------------
+# ---------------- Notificaciones SSE ----------------
+notification_clients = []
+notification_clients_lock = threading.Lock()
+
+
+def send_notification(notification_data):
+    """Envía una notificación a todos los clientes conectados vía SSE"""
+    with notification_clients_lock:
+        dead_clients = []
+        for client_queue in notification_clients:
+            try:
+                client_queue.put_nowait(notification_data)
+            except Exception as e:
+                logger.warning(f"Error sending notification: {e}")
+                dead_clients.append(client_queue)
+        
+        for dead in dead_clients:
+            if dead in notification_clients:
+                notification_clients.remove(dead)
+
+
+# ---------------- Cache TTL ----------------
 
 _cache = {}
 _cache_lock = threading.Lock()
@@ -206,10 +232,7 @@ def db_connect():
     return conn
 
 def init_user_db():
-    """
-    Crea las tablas de usuarios y laboratorios si no existen y asegura
-    que exista el usuario admin inicial.
-    """
+    """Crea las tablas de usuarios y laboratorios si no existen y asegura que exista el usuario admin inicial."""
     conn = db_connect()
     try:
         conn.execute("""
@@ -242,6 +265,10 @@ def init_user_db():
                 (AUTH_USER, generate_password_hash(AUTH_PASS), "admin", datetime.now().isoformat(timespec="seconds"))
             )
             conn.commit()
+            logger.info(f"Usuario admin '{AUTH_USER}' creado")
+    except Exception as e:
+        logger.error(f"Error en init_user_db: {e}")
+        raise
     finally:
         conn.close()
 
@@ -269,6 +296,7 @@ def create_user(username: str, password: str, role: str):
             (username, generate_password_hash(password), role, datetime.now().isoformat(timespec="seconds"))
         )
         conn.commit()
+        logger.info(f"Usuario creado: {username} (rol={role})")
     finally:
         conn.close()
 
@@ -277,6 +305,7 @@ def set_user_role(username: str, role: str):
     try:
         conn.execute("UPDATE users SET role = ? WHERE username = ?", (role, username))
         conn.commit()
+        logger.info(f"Rol de {username} actualizado a {role}")
     finally:
         conn.close()
 
@@ -286,6 +315,7 @@ def set_user_password(username: str, new_password: str):
         conn.execute("UPDATE users SET password_hash = ? WHERE username = ?",
                      (generate_password_hash(new_password), username))
         conn.commit()
+        logger.info(f"Contraseña de {username} actualizada")
     finally:
         conn.close()
 
@@ -294,6 +324,7 @@ def delete_user(username: str):
     try:
         conn.execute("DELETE FROM users WHERE username = ?", (username,))
         conn.commit()
+        logger.info(f"Usuario eliminado: {username}")
     finally:
         conn.close()
 
@@ -335,6 +366,7 @@ def set_user_labs(username: str, labs):
                 (username, lab, now)
             )
         conn.commit()
+        logger.info(f"Labs asignados a {username}: {labs_norm}")
     finally:
         conn.close()
 
@@ -343,17 +375,16 @@ def clear_user_labs(username: str):
     try:
         conn.execute("DELETE FROM user_labs WHERE username = ?", (username,))
         conn.commit()
+        logger.info(f"Labs eliminados para {username}")
     finally:
         conn.close()
-
 
 # ---------------- Plantillas profesores (SQLite) ----------------
 
 def init_teacher_templates_db():
-    """Crea/actualiza tabla de plantillas publicadas por profesores (con soporte asíncrono)."""
+    """Crea/actualiza tabla de plantillas publicadas por profesores."""
     conn = db_connect()
     try:
-        # 1. Crear tabla base si no existe
         conn.execute("""
             CREATE TABLE IF NOT EXISTS teacher_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -369,7 +400,6 @@ def init_teacher_templates_db():
             )
         """)
         
-        # 2. MIGRACIÓN: Añadir columnas para el soporte asíncrono ANTES de los índices
         cols = {r[1] for r in conn.execute("PRAGMA table_info(teacher_templates)").fetchall()}
         if "status" not in cols:
             conn.execute("ALTER TABLE teacher_templates ADD COLUMN status TEXT NOT NULL DEFAULT 'done'")
@@ -378,12 +408,15 @@ def init_teacher_templates_db():
         if "error" not in cols:
             conn.execute("ALTER TABLE teacher_templates ADD COLUMN error TEXT")
 
-        # 3. Crear índices
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_user_lab ON teacher_templates(vcenter_id, username, lab_name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_name ON teacher_templates(vcenter_id, template_name)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tt_vc_status ON teacher_templates(vcenter_id, status)")
         
         conn.commit()
+        logger.info("Tabla teacher_templates inicializada")
+    except Exception as e:
+        logger.error(f"Error en init_teacher_templates_db: {e}")
+        raise
     finally:
         conn.close()
 
@@ -451,6 +484,7 @@ def _tt_mark_done(template_id: int, template_moid: str | None):
     try:
         conn.execute("UPDATE teacher_templates SET status='done', template_moid=?, error=NULL WHERE id=?", (template_moid, template_id))
         conn.commit()
+        logger.info(f"Plantilla {template_id} marcada como done")
     finally:
         conn.close()
 
@@ -459,6 +493,7 @@ def _tt_mark_error(template_id: int, error_msg: str):
     try:
         conn.execute("UPDATE teacher_templates SET status='error', error=? WHERE id=?", (error_msg[:500], template_id))
         conn.commit()
+        logger.error(f"Plantilla {template_id} marcada como error: {error_msg}")
     finally:
         conn.close()
 
@@ -481,6 +516,7 @@ def _tt_mark_deleted(vcenter_id: str, template_id: int, deleted_by: str):
             (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), deleted_by, vcenter_id, template_id)
         )
         conn.commit()
+        logger.info(f"Plantilla {template_id} marcada como eliminada por {deleted_by}")
     finally:
         conn.close()
 
@@ -497,16 +533,20 @@ def _sanitize_name(s: str) -> str:
     return s[:80] if len(s) > 80 else s
 
 
-def _wait_task(task, timeout_sec: int = 1800):
+def _wait_task(task, timeout_sec: int = 1800) -> Tuple[bool, Optional[str]]:
+    """Esperar a que una tarea de vCenter termine. Retorna (ok, error_msg)"""
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
-        st = getattr(getattr(task, "info", None), "state", None)
-        if st == vim.TaskInfo.State.success:
-            return True, None
-        if st == vim.TaskInfo.State.error:
-            err = getattr(task.info, "error", None)
-            msg = getattr(err, "msg", str(err)) if err else "unknown error"
-            return False, msg
+        try:
+            st = getattr(getattr(task, "info", None), "state", None)
+            if st == vim.TaskInfo.State.success:
+                return True, None
+            if st == vim.TaskInfo.State.error:
+                err = task.info.error
+                msg = getattr(err, "msg", str(err)) if err else "unknown error"
+                return False, msg
+        except Exception as e:
+            return False, f"task check error: {e}"
         time.sleep(1)
     return False, "timeout"
 
@@ -583,26 +623,49 @@ def _soft_poweroff_vm(vm):
 
 
 def _delete_template_in_vcenter(content, template_moid: str | None, template_name: str):
+    """
+    Elimina una plantilla en vCenter.
+    Si la plantilla no existe en vCenter, la considera ya eliminada (manejo de huérfanos).
+    
+    Returns:
+        (ok: bool, message: str)
+    """
     tmpl = None
+    
     if template_moid:
         tmpl = find_vm_by_moid(content, template_moid)
+        if tmpl:
+            logger.debug(f"Plantilla encontrada por MOID: {template_moid} -> {tmpl.name}")
+    
     if not tmpl:
         tmpl = get_obj_by_name(content, [vim.VirtualMachine], template_name)
+        if tmpl:
+            logger.debug(f"Plantilla encontrada por nombre: {template_name}")
+    
     if not tmpl:
-        return False, "template not found"
+        logger.warning(f"Plantilla '{template_name}' (MOID: {template_moid}) no encontrada en vCenter - Considerada como ya eliminada")
+        return True, "template not found in vcenter (already deleted)"
+    
     try:
         if not (tmpl.config and tmpl.config.template):
-            return False, "object is not a template"
-    except Exception:
-        pass
-
+            logger.warning(f"Objeto '{template_name}' no es una plantilla - Considerando como ya eliminado")
+            return True, "object is not a template (already deleted)"
+    except Exception as e:
+        logger.error(f"Error verificando si '{template_name}' es plantilla: {e}")
+    
     try:
+        logger.info(f"Eliminando plantilla '{template_name}' en vCenter...")
         t = tmpl.Destroy_Task()
         ok, err = _wait_task(t, timeout_sec=1800)
-        return ok, err
+        if ok:
+            logger.info(f"Plantilla '{template_name}' eliminada correctamente en vCenter")
+            return True, "template deleted successfully"
+        else:
+            logger.error(f"Error eliminando plantilla '{template_name}': {err}")
+            return False, err
     except Exception as e:
+        logger.error(f"Excepción eliminando plantilla '{template_name}': {e}")
         return False, str(e)
-
 
 # --------- Thread para creación de plantillas asíncrona ---------
 def _publish_teacher_template_job(vcenter_id: str, job_id: str, template_row_id: int, username: str, lab_name: str, tmpl_name: str):
@@ -623,7 +686,6 @@ def _publish_teacher_template_job(vcenter_id: str, job_id: str, template_row_id:
             dest_folder = _ensure_teacher_templates_folder(content, username)
 
             reloc = vim.vm.RelocateSpec()
-            # Intentar rellenar con el entorno de la VM actual para asegurar que no rechace el CloneSpec
             try:
                 if getattr(vm, "resourcePool", None): reloc.pool = vm.resourcePool
                 if getattr(vm, "datastore", None): reloc.datastore = vm.datastore[0]
@@ -660,120 +722,6 @@ def _publish_teacher_template_job(vcenter_id: str, job_id: str, template_row_id:
         _tt_mark_error(template_row_id, err)
         jobs[job_id]["status"] = "error"
 
-
-# ---------------- Auth / roles ----------------
-
-def login_required(f):
-    @wraps(f)
-    def wrapper(*args, **kwargs):
-        if not session.get("authed"):
-            return redirect(url_for("login", next=request.path))
-        return f(*args, **kwargs)
-    return wrapper
-
-def role_required(*roles):
-    def deco(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            if not session.get("authed"):
-                return redirect(url_for("login", next=request.path))
-            role = session.get("role")
-            if role not in roles:
-                flash("No tienes permisos para acceder a esta sección.", "warning")
-                return redirect(url_for("home"))
-            return f(*args, **kwargs)
-        return wrapper
-    return deco
-
-
-# ---------------- vCenter selector (admin) ----------------
-
-def _vcenter_choices():
-    """Lista de vCenters para UI: [{id,label,host}, ...]"""
-    return [{"id": cfg["id"], "label": cfg["label"], "host": cfg["host"]} for cfg in VCENTERS.values()]
-
-
-@app.context_processor
-def inject_vcenter_context():
-    vcid = get_active_vcenter_id()
-    active = VCENTERS.get(vcid) if vcid else None
-    return {
-        "vcenters_nav": _vcenter_choices(),
-        "active_vcenter_id": vcid,
-        "active_vcenter_label": (active["label"] if active else None),
-        "active_vcenter_host": (active["host"] if active else None),
-    }
-
-
-@app.before_request
-def _require_admin_vcenter_selected():
-    """Admin debe seleccionar vCenter antes de operar (evita acciones por defecto en el equivocado)."""
-    if not has_request_context():
-        return
-    if not session.get("authed"):
-        return
-    if session.get("role") != "admin":
-        return
-    if session.get("vcenter_id"):
-        return
-
-    ep = request.endpoint or ""
-    allowed = {"home", "login", "logout", "select_vcenter", "account_password", "static"}
-    if ep in allowed or ep.startswith("static"):
-        return
-
-    flash("Selecciona el vCenter con el que quieres trabajar.", "warning")
-    return redirect(url_for("home"))
-
-
-@app.post("/vcenter/select")
-@login_required
-@role_required("admin")
-def select_vcenter():
-    vcid = (request.form.get("vcenter_id") or "").strip()
-    if vcid not in VCENTERS:
-        flash("vCenter inválido.", "danger")
-        return redirect(url_for("home"))
-
-    session["vcenter_id"] = vcid
-    flash(f"vCenter activo: <strong>{VCENTERS[vcid]['label']}</strong> ({VCENTERS[vcid]['host']})", "success")
-
-    nxt = request.form.get("next") or url_for("home")
-    return redirect(nxt)
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        u = (request.form.get("username") or "").strip()
-        p = request.form.get("password") or ""
-
-        user = get_user(u)
-        if user and check_password_hash(user["password_hash"], p):
-            session["authed"] = True
-            session["username"] = user["username"]
-            session["role"] = user["role"]
-
-            # vCenter activo:
-            #  - admin debe elegirlo tras loguear (no se asume por defecto)
-            #  - profesor queda fijado a PROF_VCENTER
-            if user["role"] == "admin":
-                session.pop("vcenter_id", None)
-            else:
-                session["vcenter_id"] = PROF_VCENTER
-
-            nxt = request.args.get("next") or url_for("home")
-            return redirect(nxt)
-
-        flash("Credenciales inválidas", "danger")
-
-    return render_template("login.html")
-
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
 # ---------------- vCenter helpers ----------------
 
 def connect_vcenter(vcenter_id=None):
@@ -783,22 +731,28 @@ def connect_vcenter(vcenter_id=None):
     pwd = cfg["password"]
     verify_ssl = bool(cfg.get("verify_ssl"))
 
-    if verify_ssl:
-        si = connect.SmartConnect(host=host, user=user, pwd=pwd)
-    else:
-        context = ssl._create_unverified_context()
-        si = connect.SmartConnect(host=host, user=user, pwd=pwd, sslContext=context)
-    return si
+    try:
+        if verify_ssl:
+            si = connect.SmartConnect(host=host, user=user, pwd=pwd)
+        else:
+            context = ssl._create_unverified_context()
+            si = connect.SmartConnect(host=host, user=user, pwd=pwd, sslContext=context)
+        logger.info(f"Conectado a vCenter {vcid} ({host})")
+        return si
+    except Exception as e:
+        logger.error(f"Error conectando a vCenter {vcid}: {e}")
+        raise
 
 def disconnect_vcenter(si):
     try:
         connect.Disconnect(si)
-    except Exception:
-        pass
+        logger.debug("Desconectado de vCenter")
+    except Exception as e:
+        logger.debug(f"Error al desconectar: {e}")
 
 @contextmanager
 def vcenter_ctx(vcenter_id=None):
-    """Context manager para asegurar Disconnect. Acepta vcenter_id para threads/acciones internas."""
+    """Context manager para asegurar Disconnect."""
     si = None
     try:
         si = connect_vcenter(vcenter_id)
@@ -885,8 +839,47 @@ def get_snapshot_info(vm):
         latest_obj = getattr(latest_node, "snapshot", None)
 
         return True, len(nodes), latest_name, latest_obj
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Error obteniendo snapshots: {e}")
         return False, 0, None, None
+
+def _vm_ip_list(vm) -> list[str]:
+    import ipaddress
+    ips = set()
+
+    def add_ip(s: str):
+        if not s:
+            return
+        s = str(s).strip()
+        if not s:
+            return
+        s_clean = s.split("%")[0]
+        try:
+            ip = ipaddress.ip_address(s_clean)
+        except ValueError:
+            return
+        if ip.is_loopback or ip.is_link_local:
+            return
+        ips.add(str(ip))
+
+    try:
+        g = getattr(vm, "guest", None)
+        if g:
+            try:
+                add_ip(getattr(g, "ipAddress", None))
+            except Exception:
+                pass
+            try:
+                nets = getattr(g, "net", None) or []
+                for n in nets:
+                    for ip in (getattr(n, "ipAddress", None) or []):
+                        add_ip(ip)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return sorted(ips)
 
 def list_vms_in_folder(content, folder_obj):
     view = content.viewManager.CreateContainerView(folder_obj, [vim.VirtualMachine], True)
@@ -913,14 +906,14 @@ def list_vms_in_folder(content, folder_obj):
                 "power": power,
                 "has_snapshot": has_snapshot,
                 "snapshot_count": snapshot_count,
-                "latest_snapshot_name": latest_name
+                "latest_snapshot_name": latest_name,
+                "ips": _vm_ip_list(vm)
             })
     finally:
         view.Destroy()
     return sorted(vms, key=lambda x: x["name"].lower())
 
 def count_vms_in_folder(content, folder_obj) -> int:
-    """Cuenta VMs en una carpeta (excluye templates)."""
     view = content.viewManager.CreateContainerView(folder_obj, [vim.VirtualMachine], True)
     try:
         n = 0
@@ -974,16 +967,12 @@ def ensure_lab_access(lab_name: str) -> bool:
 def vm_is_in_lab(vm, lab_name: str) -> bool:
     """True si la VM está dentro de la carpeta del lab O es la VM de profesor de ese lab."""
     try:
-        # 1. Comprobar jerarquía de carpetas
         cur = getattr(vm, "parent", None)
         while cur is not None:
             if isinstance(cur, vim.Folder):
-                # Caso A: Está en la carpeta normal del laboratorio
                 if cur.name == lab_name:
                     return True
-                # Caso B: Está en la carpeta de PROFESORES y el nombre de la VM empieza por el nombre del lab
                 if cur.name == TEACHERS_FOLDER:
-                    # Verificamos que la VM pertenezca a este lab (ej: "Lab - MiLab-profe1")
                     if vm.name.startswith(lab_name):
                         return True
             cur = getattr(cur, "parent", None)
@@ -992,10 +981,6 @@ def vm_is_in_lab(vm, lab_name: str) -> bool:
     return False
     
 def can_access_vm_without_lab(vm) -> bool:
-    """
-    Para endpoints que no reciben lab_name (ej: /api/vm/power),
-    valida que la VM pertenezca a ALGUNO de los labs asignados al profesor.
-    """
     if session.get("role") == "admin":
         return True
 
@@ -1021,6 +1006,7 @@ def job_logger_put(job_id, msg):
     q = jobs[job_id]["queue"]
     ts = datetime.now().strftime("%H:%M:%S")
     q.put(f"[{ts}] {msg}")
+    logger.debug(f"Job {job_id}: {msg}")
 
 def build_network_device_change(vm_template, target_network):
     device_changes = []
@@ -1173,7 +1159,7 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
                 dest_folder = datacenter.vmFolder.CreateFolder(folder_name)
                 time.sleep(1)
                 job_logger_put(job_id, f"[OK] Carpeta '{folder_name}' creada.")
-                _cache_clear("labs:")  # el listado de labs puede cambiar
+                _cache_clear("labs:")
 
             datastore = get_obj_by_name(content, [vim.Datastore], datastore_name)
             if not datastore:
@@ -1206,7 +1192,6 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
             host_cache = {}
             rp_cache = {}
 
-            # Evita búsquedas repetidas y conflictos por nombre en la carpeta destino
             existing_names = _existing_vm_names_in_folder(content, dest_folder)
 
             for i, username in enumerate(usuarios, start=1):
@@ -1256,6 +1241,14 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
                         vm_obj = getattr(info, "result", None)
                         job_logger_put(job_id, f"[{i}] Clone OK: {vm_name}")
                         existing_names.add(vm_name)
+                        # Enviar notificación de VM creada
+                        send_notification({
+                            'type': 'vm_created',
+                            'vm_name': vm_name,
+                            'lab_name': folder_name,
+                            'username': username,
+                            'timestamp': datetime.now().isoformat()
+                        })
                         break
                     elif info.state == vim.TaskInfo.State.error:
                         err_msg = getattr(info.error, "msg", str(info.error)) if info.error else "desconocido"
@@ -1264,13 +1257,11 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
                     time.sleep(1)
 
                 if not vm_obj:
-                    # fallback
                     vm_obj = get_obj_by_name(content, [vim.VirtualMachine], vm_name)
 
                 if not vm_obj:
                     job_logger_put(job_id, f"[{i}] [WARN] VM {vm_name} no encontrada tras clonar; permisos omitidos.")
                     continue
-
 
                 if make_snapshot:
                     try:
@@ -1320,7 +1311,6 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
                     else:
                         rp_for_teacher = host_for_teacher.parent.resourcePool if hasattr(host_for_teacher.parent, "resourcePool") else None
 
-                        # Para evitar duplicados dentro de Profesores
                         existing_prof_names = _existing_vm_names_in_folder(content, prof_folder)
                         if teacher_vm_name in existing_prof_names:
                             job_logger_put(job_id, f"[PROF] SKIP: Ya existe '{teacher_vm_name}' en carpeta Profesores.")
@@ -1388,10 +1378,175 @@ def clone_and_assign(vcenter_id, job_id, template_name, folder_name, csv_path, d
 
         job_logger_put(job_id, f"[END] Tarea {job_id} completada.")
         jobs[job_id]["status"] = "done"
+        
+        # Enviar notificación de job completado
+        send_notification({
+            'type': 'job_completed',
+            'job_id': job_id,
+            'lab_name': folder_name,
+            'vm_count': len(usuarios),
+            'message': f'Laboratorio {folder_name} creado exitosamente'
+        })
 
     except Exception as e:
         job_logger_put(job_id, f"[FATAL] Excepción en la tarea {job_id}: {e}")
         jobs[job_id]["status"] = "error"
+        
+        send_notification({
+            'type': 'job_failed',
+            'job_id': job_id,
+            'error': str(e)
+        })
+
+# ---------------- Auth / roles ----------------
+
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("authed"):
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return wrapper
+
+def role_required(*roles):
+    def deco(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if not session.get("authed"):
+                return redirect(url_for("login", next=request.path))
+            role = session.get("role")
+            if role not in roles:
+                flash("No tienes permisos para acceder a esta sección.", "warning")
+                return redirect(url_for("home"))
+            return f(*args, **kwargs)
+        return wrapper
+    return deco
+
+# ---------------- vCenter selector (admin) ----------------
+
+def _vcenter_choices():
+    return [{"id": cfg["id"], "label": cfg["label"], "host": cfg["host"]} for cfg in VCENTERS.values()]
+
+
+@app.context_processor
+def inject_vcenter_context():
+    vcid = get_active_vcenter_id()
+    active = VCENTERS.get(vcid) if vcid else None
+    return {
+        "vcenters_nav": _vcenter_choices(),
+        "active_vcenter_id": vcid,
+        "active_vcenter_label": (active["label"] if active else None),
+        "active_vcenter_host": (active["host"] if active else None),
+    }
+
+
+@app.before_request
+def _require_admin_vcenter_selected():
+    if not has_request_context():
+        return
+    if not session.get("authed"):
+        return
+    if session.get("role") != "admin":
+        return
+    if session.get("vcenter_id"):
+        return
+
+    ep = request.endpoint or ""
+    allowed = {"home", "login", "logout", "select_vcenter", "account_password", "static"}
+    if ep in allowed or ep.startswith("static"):
+        return
+
+    flash("Selecciona el vCenter con el que quieres trabajar.", "warning")
+    return redirect(url_for("home"))
+
+
+@app.post("/vcenter/select")
+@login_required
+@role_required("admin")
+def select_vcenter():
+    vcid = (request.form.get("vcenter_id") or "").strip()
+    if vcid not in VCENTERS:
+        flash("vCenter inválido.", "danger")
+        return redirect(url_for("home"))
+
+    session["vcenter_id"] = vcid
+    flash(f"vCenter activo: <strong>{VCENTERS[vcid]['label']}</strong> ({VCENTERS[vcid]['host']})", "success")
+    logger.info(f"Admin {session.get('username')} seleccionó vCenter {vcid}")
+
+    nxt = request.form.get("next") or url_for("home")
+    return redirect(nxt)
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        u = (request.form.get("username") or "").strip()
+        p = request.form.get("password") or ""
+
+        user = get_user(u)
+        if user and check_password_hash(user["password_hash"], p):
+            session["authed"] = True
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+
+            if user["role"] == "admin":
+                session.pop("vcenter_id", None)
+            else:
+                session["vcenter_id"] = PROF_VCENTER
+
+            logger.info(f"Usuario {u} (rol={user['role']}) inició sesión")
+            
+            send_notification({
+                'type': 'user_login',
+                'username': u,
+                'role': user['role']
+            })
+
+            nxt = request.args.get("next") or url_for("home")
+            return redirect(nxt)
+
+        flash("Credenciales inválidas", "danger")
+        logger.warning(f"Intento de login fallido para {u}")
+
+    return render_template("login.html")
+
+@app.route("/logout")
+def logout():
+    logger.info(f"Usuario {session.get('username')} cerró sesión")
+    session.clear()
+    return redirect(url_for("login"))
+
+
+
+
+# ---------------- Stream de notificaciones ----------------
+@app.route("/stream/notifications")
+@login_required
+def notification_stream():
+    """Stream de notificaciones en tiempo real para eventos del sistema"""
+    def generate():
+        client_queue = Queue()
+        client_id = str(uuid.uuid4())[:8]
+        
+        with notification_clients_lock:
+            notification_clients.append(client_queue)
+            logger.debug(f"Cliente de notificaciones conectado: {client_id}")
+        
+        try:
+            while True:
+                try:
+                    data = client_queue.get(timeout=30)
+                    yield f"data: {json.dumps(data)}\n\n"
+                except Empty:
+                    yield ": keepalive\n\n"
+        finally:
+            with notification_clients_lock:
+                if client_queue in notification_clients:
+                    notification_clients.remove(client_queue)
+                    logger.debug(f"Cliente de notificaciones desconectado: {client_id}")
+    
+    return Response(generate(), mimetype="text/event-stream")
+
 
 # ---------------- Vistas ----------------
 
@@ -1415,11 +1570,18 @@ def create_lab():
         networks=networks
     )
 
+
+#-----Vista Dashboard ------
+
+@app.route("/dashboard")
+@login_required
+def dashboard():
+    return render_template("dashboard.html")
+
 @app.route("/labs")
 @login_required
 def labs():
     with vcenter_ctx() as (_, content):
-        # Cachear solo el listado de labs (no conteos)
         vcid, _cfg = get_vcenter_cfg()
         cache_key = f"labs:{vcid}:list:{LAB_FOLDER_PREFIX}"
         lab_names = _cache_get(cache_key)
@@ -1447,8 +1609,7 @@ def labs():
 
         labs_data.sort(key=lambda x: x["name"].lower())
         return render_template("labs.html", labs=labs_data, prefix=LAB_FOLDER_PREFIX, empty_message=empty_message)
-
-
+ 
 @app.route("/labs/<lab_name>")
 @login_required
 def lab_detail(lab_name):
@@ -1463,7 +1624,6 @@ def lab_detail(lab_name):
 
         vms = list_vms_in_folder(content, folder)
 
-        # --- NUEVO: Buscar VMs de los profesores para este lab ---
         teacher_vms = []
         prof_folder = find_folder_by_name(content, TEACHERS_FOLDER)
         if prof_folder:
@@ -1476,9 +1636,7 @@ def lab_detail(lab_name):
                     except Exception:
                         pass
                     
-                    # Filtramos por el nombre del lab (ej: "Lab1-profesorA")
                     if vm.name.startswith(f"{lab_name}-"):
-                        # Si es profesor, solo ve su propia VM. Si es admin, ve todas las del lab.
                         if session.get("role") != "admin" and vm.name != f"{lab_name}-{session.get('username')}":
                             continue
 
@@ -1496,7 +1654,8 @@ def lab_detail(lab_name):
                             "power": power,
                             "has_snapshot": has_snapshot,
                             "snapshot_count": snapshot_count,
-                            "latest_snapshot_name": latest_name
+                            "latest_snapshot_name": latest_name,
+                            "ips": _vm_ip_list(vm)
                         })
             finally:
                 view.Destroy()
@@ -1507,7 +1666,7 @@ def lab_detail(lab_name):
             "lab_detail.html",
             lab_name=lab_name,
             vms=vms,
-            teacher_vms=teacher_vms, # <-- PASAMOS LA LISTA DE VMs
+            teacher_vms=teacher_vms,
             vcenter_host=get_vcenter_cfg()[1]['host'],
             poll_interval_ms=POLL_INTERVAL_MS
         )
@@ -1622,7 +1781,6 @@ def my_templates_publish():
     base = _sanitize_name(_strip_lab_prefix(lab_name))
     tmpl_name = _sanitize_name(f"{TEACHER_TEMPLATE_PREFIX}-{base}-{username}-{slot}")
 
-    # Configuración del Job Asíncrono
     job_id = str(uuid.uuid4())[:8]
     q = Queue()
     jobs[job_id] = {"status": "running", "queue": q, "created_at": datetime.now().isoformat(timespec="seconds")}
@@ -1780,10 +1938,131 @@ def api_vm_power():
             "power": power,
             "has_snapshot": has_snapshot,
             "snapshot_count": snapshot_count,
-            "latest_snapshot_name": latest_name
+            "latest_snapshot_name": latest_name,
+            "ips": _vm_ip_list(vm)
         })
         resp.headers["Cache-Control"] = "no-store"
         return resp
+
+# ----Dashboard Endpoint -----
+
+@app.route("/api/dashboard/stats")
+@login_required
+def api_dashboard_stats():
+    """API para obtener estadísticas del dashboard"""
+    try:
+        stats = {}
+        
+        # Conectar a vCenter para obtener estadísticas
+        with vcenter_ctx() as (_, content):
+            # Obtener todos los labs
+            lab_names = list_lab_folders(content, prefix=LAB_FOLDER_PREFIX)
+            stats['total_labs'] = len(lab_names)
+            stats['active_labs'] = 0
+            stats['empty_labs'] = 0
+            stats['total_vms'] = 0
+            stats['vms_on'] = 0
+            stats['vms_off'] = 0
+            stats['vms_suspended'] = 0
+            
+            top_labs = []
+            
+            for lab_name in lab_names:
+                folder = find_folder_by_name(content, lab_name)
+                if folder:
+                    vms = list_vms_in_folder(content, folder)
+                    vm_count = len(vms)
+                    stats['total_vms'] += vm_count
+                    
+                    # Contar estados de VMs
+                    for vm in vms:
+                        if vm['power'] == 'poweredOn':
+                            stats['vms_on'] += 1
+                        elif vm['power'] == 'poweredOff':
+                            stats['vms_off'] += 1
+                        elif vm['power'] == 'suspended':
+                            stats['vms_suspended'] += 1
+                    
+                    if vm_count > 0:
+                        stats['active_labs'] += 1
+                        top_labs.append({'name': lab_name, 'count': vm_count})
+                    else:
+                        stats['empty_labs'] += 1
+            
+            # Ordenar top labs
+            top_labs.sort(key=lambda x: x['count'], reverse=True)
+            stats['top_labs'] = top_labs[:10]
+        
+        # Estadísticas de usuarios
+        conn = db_connect()
+        try:
+            users = conn.execute("SELECT role, COUNT(*) as count FROM users GROUP BY role").fetchall()
+            stats['total_users'] = sum(u['count'] for u in users)
+            stats['admin_users'] = 0
+            stats['profesor_users'] = 0
+            for u in users:
+                if u['role'] == 'admin':
+                    stats['admin_users'] = u['count']
+                else:
+                    stats['profesor_users'] = u['count']
+        finally:
+            conn.close()
+        
+        # Estadísticas de plantillas
+        vcid, _cfg = get_vcenter_cfg()
+        conn = db_connect()
+        try:
+            templates = conn.execute(
+                "SELECT COUNT(*) as count FROM teacher_templates WHERE vcenter_id=? AND deleted_at IS NULL AND status='done'",
+                (vcid,)
+            ).fetchone()
+            stats['total_templates'] = templates['count'] if templates else 0
+        finally:
+            conn.close()
+        
+        # Jobs recientes
+        recent_jobs = []
+        for job_id, job_data in list(jobs.items())[:10]:
+            recent_jobs.append({
+                'id': job_id,
+                'status': job_data.get('status', 'unknown'),
+                'created_at': job_data.get('created_at', ''),
+                'type': 'Lab',
+                'lab_name': job_data.get('lab_name', 'Desconocido')
+            })
+        stats['recent_jobs'] = recent_jobs
+        
+        # Programaciones activas
+        conn = db_connect()
+        try:
+            schedules = conn.execute(
+                "SELECT id, name, on_days, on_time, off_days, off_time, enabled FROM schedules WHERE vcenter_id=?",
+                (vcid,)
+            ).fetchall()
+            stats['active_schedules'] = [
+                {
+                    'id': s['id'],
+                    'name': s['name'],
+                    'on_days': s['on_days'],
+                    'on_time': s['on_time'],
+                    'off_days': s['off_days'],
+                    'off_time': s['off_time'],
+                    'enabled': bool(s['enabled'])
+                }
+                for s in schedules
+            ]
+        finally:
+            conn.close()
+        
+        # Tendencias (simuladas o desde logs)
+        stats['vm_trend'] = 0  # Podrías calcular desde historial
+        stats['lab_trend'] = 0
+        
+        return jsonify({'ok': True, 'stats': stats})
+        
+    except Exception as e:
+        logger.error(f"Error en dashboard stats: {e}")
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 # -------- Snapshot create/delete --------
 @app.post("/vm/snapshot/create")
@@ -1831,6 +2110,13 @@ def vm_snapshot_create():
         except Exception as e:
             flash(f"Error creando snapshot: {e}", "danger")
             return redirect(url_for("lab_detail", lab_name=lab_name))
+        
+        send_notification({
+            'type': 'snapshot_created',
+            'vm_name': vm.name,
+            'lab_name': lab_name,
+            'snapshot_name': snap_name
+        })
 
     flash(f"Snapshot creado: '{snap_name}'. Usa 'Actualizar estados'.", "success")
     return redirect(url_for("lab_detail", lab_name=lab_name))
@@ -1885,6 +2171,13 @@ def vm_snapshot_delete_last():
         except Exception as e:
             flash(f"Error eliminando snapshot: {e}", "danger")
             return redirect(url_for("lab_detail", lab_name=lab_name))
+        
+        send_notification({
+            'type': 'snapshot_deleted',
+            'vm_name': vm.name,
+            'lab_name': lab_name,
+            'snapshot_name': latest_name
+        })
 
     flash(f"Snapshot eliminado: '{latest_name}'. Usa 'Actualizar estados'.", "warning")
     return redirect(url_for("lab_detail", lab_name=lab_name))
@@ -1920,6 +2213,15 @@ def vm_power_on():
             return redirect(url_for("lab_detail", lab_name=lab_name))
 
         vm.PowerOnVM_Task()
+        
+        send_notification({
+            'type': 'vm_power_changed',
+            'moid': moid,
+            'vm_name': vm.name,
+            'lab_name': lab_name,
+            'power': 'poweredOn',
+            'action': 'on'
+        })
 
     flash("Encendido solicitado. Usa 'Actualizar estados'.", "success")
     return redirect(url_for("lab_detail", lab_name=lab_name))
@@ -1963,11 +2265,27 @@ def vm_power_off():
             vm.ShutdownGuest()
             ok = wait_for_power_state(vm, "poweredOff", SOFT_SHUTDOWN_TIMEOUT_SEC)
             if ok:
+                send_notification({
+                    'type': 'vm_power_changed',
+                    'moid': moid,
+                    'vm_name': vm.name,
+                    'lab_name': lab_name,
+                    'power': 'poweredOff',
+                    'action': 'off'
+                })
                 flash("Apagado amable completado (ShutdownGuest).", "success")
                 return redirect(url_for("lab_detail", lab_name=lab_name))
 
             if SOFT_SHUTDOWN_FALLBACK_HARD:
                 vm.PowerOffVM_Task()
+                send_notification({
+                    'type': 'vm_power_changed',
+                    'moid': moid,
+                    'vm_name': vm.name,
+                    'lab_name': lab_name,
+                    'power': 'poweredOff',
+                    'action': 'off_forced'
+                })
                 flash(f"No se apagó en {SOFT_SHUTDOWN_TIMEOUT_SEC}s. Se aplicó PowerOff (hard).", "warning")
             else:
                 flash(f"ShutdownGuest enviado, pero no apagó en {SOFT_SHUTDOWN_TIMEOUT_SEC}s. Tools={tools_status}.", "warning")
@@ -1978,6 +2296,14 @@ def vm_power_off():
             if SOFT_SHUTDOWN_FALLBACK_HARD:
                 try:
                     vm.PowerOffVM_Task()
+                    send_notification({
+                        'type': 'vm_power_changed',
+                        'moid': moid,
+                        'vm_name': vm.name,
+                        'lab_name': lab_name,
+                        'power': 'poweredOff',
+                        'action': 'off_forced'
+                    })
                     flash(f"ShutdownGuest falló ({e}). Se aplicó PowerOff (hard).", "warning")
                 except Exception as e2:
                     flash(f"ShutdownGuest falló ({e}) y PowerOff falló ({e2}).", "danger")
@@ -2016,11 +2342,24 @@ def vm_power_reboot():
 
         try:
             vm.RebootGuest()
+            send_notification({
+                'type': 'vm_reboot',
+                'moid': moid,
+                'vm_name': vm.name,
+                'lab_name': lab_name
+            })
             flash("Reinicio amable solicitado (RebootGuest).", "success")
         except Exception as e:
             if SOFT_REBOOT_FALLBACK_RESET:
                 try:
                     vm.ResetVM_Task()
+                    send_notification({
+                        'type': 'vm_reboot',
+                        'moid': moid,
+                        'vm_name': vm.name,
+                        'lab_name': lab_name,
+                        'forced': True
+                    })
                     flash(f"RebootGuest falló ({e}). Se aplicó Reset (hard).", "warning")
                 except Exception as e2:
                     flash(f"RebootGuest falló ({e}) y Reset falló ({e2}).", "danger")
@@ -2070,6 +2409,13 @@ def lab_power_on():
                 started += 1
             except Exception:
                 pass
+        
+        send_notification({
+            'type': 'lab_power_changed',
+            'lab_name': lab_name,
+            'action': 'on',
+            'vm_count': started
+        })
 
     flash(f"Encendido solicitado para {started} VM(s). Usa 'Actualizar estados'.", "success")
     return redirect(url_for("lab_detail", lab_name=lab_name))
@@ -2123,6 +2469,14 @@ def lab_power_off():
                         hard_fallback += 1
                     except Exception:
                         pass
+        
+        send_notification({
+            'type': 'lab_power_changed',
+            'lab_name': lab_name,
+            'action': 'off',
+            'requested': requested,
+            'forced': hard_fallback
+        })
 
     msg = f"Apagado amable solicitado para {requested} VM(s)."
     if SOFT_SHUTDOWN_FALLBACK_HARD and hard_fallback:
@@ -2181,6 +2535,13 @@ def vm_recreate():
                 flash(f"Error recreando VM (revert snapshot): {err}", "danger")
                 return redirect(url_for("lab_detail", lab_name=lab_name))
             time.sleep(1)
+        
+        send_notification({
+            'type': 'vm_recreated',
+            'vm_name': vm.name,
+            'lab_name': lab_name,
+            'snapshot': snap_name
+        })
 
     flash(f"VM restablecida al snapshot '{snap_name}'. (Queda apagada). Usa 'Actualizar estados'.", "success")
     return redirect(url_for("lab_detail", lab_name=lab_name))
@@ -2217,7 +2578,6 @@ def lab_delete():
         finally:
             view.Destroy()
 
-        # Best effort: elimina snapshots (sin bloquear demasiado)
         for vm in vms:
             try:
                 if getattr(vm, "snapshot", None) is not None:
@@ -2247,6 +2607,12 @@ def lab_delete():
             folder.Destroy()
         except Exception:
             pass
+    
+    send_notification({
+        'type': 'lab_deleted',
+        'lab_name': lab_name,
+        'vms_deleted': deleted
+    })
 
     _cache_clear("labs:")
     flash(f"Lab eliminado. VMs borradas: {deleted}.", "success")
@@ -2312,9 +2678,6 @@ def plan_distribution():
                            make_teacher=make_teacher,
                            teacher_user=teacher_user)
 
-# --- NUEVO: Paso 3 (dry-run) antes de iniciar el job ---
-# Inserta ESTE endpoint justo ANTES de start_job_with_distribution()
-
 @app.route("/confirm_job_with_distribution", methods=["POST"])
 @login_required
 @role_required("admin")
@@ -2342,14 +2705,12 @@ def confirm_job_with_distribution():
         flash("No hay hosts para distribuir.", "danger")
         return redirect(url_for("create_lab"))
 
-    # Leer usuarios del CSV y validar conteo
     usuarios = _read_csv_users(csv_path)
     total_csv = len(usuarios)
     if total_csv <= 0:
         flash("El CSV no contiene usuarios válidos.", "danger")
         return redirect(url_for("create_lab"))
 
-    # Parsear asignaciones por host
     counts = []
     total_counts = 0
     host_inputs = []
@@ -2369,7 +2730,6 @@ def confirm_job_with_distribution():
         flash(f"La suma de asignaciones ({total_counts}) no coincide con el total del CSV ({total_csv}).", "danger")
         return redirect(url_for("create_lab"))
 
-    # Vista previa de nombres (primeros 10)
     preview_n = 10
     vm_preview = [f"{folder}-{u}" for u in usuarios[:preview_n]]
     remaining_count = max(0, total_csv - len(vm_preview))
@@ -2457,6 +2817,7 @@ def start_job_with_distribution():
     t.start()
 
     return redirect(url_for("job_page", job_id=job_id))
+
 @app.route("/job/<job_id>")
 @login_required
 def job_page(job_id):
@@ -2550,6 +2911,12 @@ def vm_delete():
                 flash(f"Error al destruir VM: {err}", "danger")
                 return redirect(url_for("lab_detail", lab_name=lab_name))
             time.sleep(1)
+        
+        send_notification({
+            'type': 'vm_deleted',
+            'vm_name': vm_name,
+            'lab_name': lab_name
+        })
 
     flash(f"VM '{vm_name}' eliminada correctamente.", "warning")
     return redirect(url_for("lab_detail", lab_name=lab_name))
@@ -2595,6 +2962,11 @@ def users_create():
     try:
         create_user(username, pwd1, role)
         flash("Usuario creado correctamente.", "success")
+        send_notification({
+            'type': 'user_created',
+            'username': username,
+            'role': role
+        })
     except Exception as e:
         flash(f"Error creando usuario: {e}", "danger")
 
@@ -2617,6 +2989,12 @@ def users_set_role(username):
 
     if role != "profesor":
         clear_user_labs(username)
+
+    send_notification({
+        'type': 'user_role_changed',
+        'username': username,
+        'new_role': role
+    })
 
     flash("Rol actualizado.", "success")
     return redirect(url_for("users_admin"))
@@ -2728,18 +3106,85 @@ def account_password():
 
     return render_template("account_password.html")
     
-    
+# ---------------- Lab Deletions ----------------
 
+def init_lab_deletions_db():
+    conn = db_connect()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS lab_delete_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                vcenter_id TEXT NOT NULL,
+                lab_name TEXT NOT NULL,
+                run_at TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','running','done','error','canceled')),
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                last_error TEXT
+            )
+        """)
+        conn.commit()
+        logger.info("Tabla lab_delete_tasks inicializada")
+    finally:
+        conn.close()
 
+def _now_iso():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _fetch_lab_delete_tasks(vcenter_id: str, limit: int = 100):
+    conn = db_connect()
+    try:
+        cur = conn.execute(
+            """SELECT id, lab_name, run_at, status, last_error
+               FROM lab_delete_tasks
+               WHERE vcenter_id=?
+               ORDER BY run_at DESC, id DESC
+               LIMIT ?""",
+            (vcenter_id, limit)
+        )
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+def _create_lab_delete_task(vcenter_id: str, lab_name: str, run_at: str, created_by: str):
+    now = _now_iso()
+    conn = db_connect()
+    try:
+        conn.execute(
+            """INSERT INTO lab_delete_tasks
+               (vcenter_id, lab_name, run_at, status, created_by, created_at, updated_at)
+               VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
+            (vcenter_id, lab_name, run_at, created_by, now, now)
+        )
+        conn.commit()
+        logger.info(f"Tarea de borrado creada: lab={lab_name}, run_at={run_at}")
+    finally:
+        conn.close()
+
+def _cancel_lab_delete_task(vcenter_id: str, task_id: int):
+    now = _now_iso()
+    conn = db_connect()
+    try:
+        conn.execute(
+            """UPDATE lab_delete_tasks
+               SET status='canceled', updated_at=?
+               WHERE id=? AND vcenter_id=? AND status='pending'""",
+            (now, task_id, vcenter_id)
+        )
+        conn.commit()
+        logger.info(f"Tarea de borrado {task_id} cancelada")
+    finally:
+        conn.close()
 
 # --- UI Routes ---
 @app.get("/lab-deletions")
 @login_required
 @role_required("admin")
 def lab_deletions_page():
-    # vCenter activo (usa tu función actual; en multi-vCenter, viene de session)
-    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or os.getenv("DEFAULT_VCENTER", "prof")
-    # labs (para el selector)
+    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or DEFAULT_VCENTER
     with vcenter_ctx(vcenter_id) as (_, content):
         lab_names = list_lab_folders(content, prefix=LAB_FOLDER_PREFIX)
         labs = []
@@ -2760,7 +3205,7 @@ def lab_deletions_page():
 @login_required
 @role_required("admin")
 def lab_deletions_create():
-    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or os.getenv("DEFAULT_VCENTER", "prof")
+    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or DEFAULT_VCENTER
     lab_name = (request.form.get("lab_name") or "").strip()
     run_at = (request.form.get("run_at") or "").strip()
     confirm = (request.form.get("confirm") or "").strip()
@@ -2773,7 +3218,6 @@ def lab_deletions_create():
         flash("Confirmación inválida.", "danger")
         return redirect(url_for("lab_deletions_page"))
 
-    # Normaliza datetime-local (YYYY-MM-DDTHH:MM) -> YYYY-MM-DD HH:MM:00
     try:
         dt = datetime.fromisoformat(run_at.replace("T", " "))
         run_at_db = dt.strftime("%Y-%m-%d %H:%M:%S")
@@ -2793,7 +3237,7 @@ def lab_deletions_create():
 @login_required
 @role_required("admin")
 def lab_deletions_cancel(task_id: int):
-    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or os.getenv("DEFAULT_VCENTER", "prof")
+    vcenter_id = session.get("vcenter_id") or get_active_vcenter_id() or DEFAULT_VCENTER
     confirm = (request.form.get("confirm") or "").strip().upper()
     if confirm != "SI":
         flash("Confirmación inválida.", "danger")
@@ -2803,35 +3247,11 @@ def lab_deletions_cancel(task_id: int):
     flash("Borrado cancelado (si estaba pendiente).", "success")
     return redirect(url_for("lab_deletions_page"))
 
-# --- Ejecutar borrado real (reutiliza tu lógica actual de lab_delete) ---
-
-def _wait_task(task, timeout_sec: int = 1800):
-    """
-    Espera a que una task de vCenter termine.
-    Retorna (ok: bool, err: str|None)
-    """
-    deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        try:
-            st = task.info.state
-            if st == vim.TaskInfo.State.success:
-                return True, None
-            if st == vim.TaskInfo.State.error:
-                err = task.info.error
-                msg = getattr(err, "msg", str(err)) if err else "unknown error"
-                return False, msg
-        except Exception as e:
-            return False, f"task check error: {e}"
-        time.sleep(1)
-    return False, "timeout"
-
-
 def delete_lab_internal(content, lab_name: str) -> dict:
     folder = find_folder_by_name(content, lab_name)
     if not folder:
         return {"ok": False, "error": "folder not found", "deleted_vms": 0}
 
-    # 1) Recoger VMs recursivamente (sin templates)
     view = content.viewManager.CreateContainerView(folder, [vim.VirtualMachine], True)
     vms = []
     try:
@@ -2845,20 +3265,15 @@ def delete_lab_internal(content, lab_name: str) -> dict:
     finally:
         view.Destroy()
 
-    # 2) Eliminar snapshots (si existen) y esperar a que terminen
     for vm in vms:
         try:
             snap = getattr(vm, "snapshot", None)
             if snap is not None and getattr(snap, "rootSnapshotList", None):
                 t = vm.RemoveAllSnapshots_Task()
                 ok, _err = _wait_task(t, timeout_sec=1800)
-                if not ok:
-                    # No abortamos aún: intentaremos borrar igualmente.
-                    pass
         except Exception:
             pass
 
-    # 3) Apagar + destruir VMs (esperar cada una)
     deleted = 0
     for vm in vms:
         vm_name = getattr(vm, "name", "?")
@@ -2875,12 +3290,10 @@ def delete_lab_internal(content, lab_name: str) -> dict:
             if ok:
                 deleted += 1
             else:
-                # Si una VM no se borra, la carpeta NO se podrá borrar.
                 return {"ok": False, "error": f"vm destroy failed: {vm_name}: {err}", "deleted_vms": deleted}
         except Exception as e:
             return {"ok": False, "error": f"vm destroy exception: {vm_name}: {e}", "deleted_vms": deleted}
 
-    # 4) Esperar a que la carpeta quede vacía (latencia de inventario)
     deadline = time.time() + 120
     while time.time() < deadline:
         try:
@@ -2891,7 +3304,6 @@ def delete_lab_internal(content, lab_name: str) -> dict:
             break
         time.sleep(2)
 
-    # 5) Si quedan subcarpetas vacías, intentar destruirlas
     try:
         children = list(getattr(folder, "childEntity", []) or [])
         for ch in children:
@@ -2904,7 +3316,6 @@ def delete_lab_internal(content, lab_name: str) -> dict:
     except Exception:
         pass
 
-    # 6) Destruir carpeta del lab (Destroy_Task + esperar)
     try:
         tf = folder.Destroy_Task()
         ok, err = _wait_task(tf, timeout_sec=600)
@@ -2916,7 +3327,6 @@ def delete_lab_internal(content, lab_name: str) -> dict:
     return {"ok": True, "deleted_vms": deleted}
 
 
-# --- Scheduler hook: procesar tareas de borrado vencidas ---
 def process_due_lab_deletions(now: datetime = None):
     if now is None:
         now = datetime.now()
@@ -2939,7 +3349,6 @@ def process_due_lab_deletions(now: datetime = None):
         task_id, vcenter_id, lab_name = int(row[0]), row[1], row[2]
         started = _now_iso()
 
-        # lock "running" (best effort)
         conn = db_connect()
         try:
             cur = conn.execute(
@@ -2990,83 +3399,9 @@ def process_due_lab_deletions(now: datetime = None):
         finally:
             conn.close()
 
-
-
-
-
-
 # ---------------- SCHEDULE (Programación energía) ----------------
 
 DOW_MAP = {0: "L", 1: "M", 2: "X", 3: "J", 4: "V", 5: "S", 6: "D"}
-
-
-def init_lab_deletions_db():
-    conn = db_connect()
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS lab_delete_tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                vcenter_id TEXT NOT NULL,
-                lab_name TEXT NOT NULL,
-                run_at TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('pending','running','done','error','canceled')),
-                created_by TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                started_at TEXT,
-                finished_at TEXT,
-                last_error TEXT
-            )
-        """)
-        conn.commit()
-    finally:
-        conn.close()
-
-def _now_iso():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-def _fetch_lab_delete_tasks(vcenter_id: str, limit: int = 100):
-    conn = db_connect()
-    try:
-        cur = conn.execute(
-            """SELECT id, lab_name, run_at, status, last_error
-               FROM lab_delete_tasks
-               WHERE vcenter_id=?
-               ORDER BY run_at DESC, id DESC
-               LIMIT ?""",
-            (vcenter_id, limit)
-        )
-        return cur.fetchall()
-    finally:
-        conn.close()
-
-def _create_lab_delete_task(vcenter_id: str, lab_name: str, run_at: str, created_by: str):
-    now = _now_iso()
-    conn = db_connect()
-    try:
-        conn.execute(
-            """INSERT INTO lab_delete_tasks
-               (vcenter_id, lab_name, run_at, status, created_by, created_at, updated_at)
-               VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
-            (vcenter_id, lab_name, run_at, created_by, now, now)
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-def _cancel_lab_delete_task(vcenter_id: str, task_id: int):
-    now = _now_iso()
-    conn = db_connect()
-    try:
-        conn.execute(
-            """UPDATE lab_delete_tasks
-               SET status='canceled', updated_at=?
-               WHERE id=? AND vcenter_id=? AND status='pending'""",
-            (now, task_id, vcenter_id)
-        )
-        conn.commit()
-    finally:
-        conn.close()
 
 def init_schedule_db():
     conn = db_connect()
@@ -3090,12 +3425,10 @@ def init_schedule_db():
                 last_off_run TEXT
             )
         """)
-        # --- Migración ligera: añadir vcenter_id a schedules si no existe ---
         cols = [r["name"] for r in conn.execute("PRAGMA table_info(schedules)").fetchall()]
         if "vcenter_id" not in cols:
             conn.execute("ALTER TABLE schedules ADD COLUMN vcenter_id TEXT")
             conn.execute("UPDATE schedules SET vcenter_id=? WHERE vcenter_id IS NULL OR vcenter_id=''", (DEFAULT_VCENTER,))
-
 
         has_runs = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='schedule_runs'"
@@ -3124,14 +3457,13 @@ def init_schedule_db():
                 FOREIGN KEY(schedule_id) REFERENCES schedules(id) ON DELETE CASCADE
             )
         """)
-        # --- Migración ligera: añadir vcenter_id a schedule_runs si no existe ---
         cols_r = [r["name"] for r in conn.execute("PRAGMA table_info(schedule_runs)").fetchall()]
         if "vcenter_id" not in cols_r:
             conn.execute("ALTER TABLE schedule_runs ADD COLUMN vcenter_id TEXT")
             conn.execute("UPDATE schedule_runs SET vcenter_id=? WHERE vcenter_id IS NULL OR vcenter_id=''", (DEFAULT_VCENTER,))
 
-
         conn.commit()
+        logger.info("Tablas schedule inicializadas")
     finally:
         conn.close()
 
@@ -3142,7 +3474,6 @@ def _split_days(s: str):
 
 def _now_minute_key(now: datetime) -> str:
     return now.strftime("%Y-%m-%d %H:%M")
-
 
 def _fetch_schedules(enabled_only=False, vcenter_id=None):
     vcid, _cfg = get_vcenter_cfg(vcenter_id)
@@ -3156,7 +3487,6 @@ def _fetch_schedules(enabled_only=False, vcenter_id=None):
     finally:
         conn.close()
 
-
 def _fetch_schedule(sched_id: int, vcenter_id=None):
     vcid, _cfg = get_vcenter_cfg(vcenter_id)
     conn = db_connect()
@@ -3165,7 +3495,6 @@ def _fetch_schedule(sched_id: int, vcenter_id=None):
         return cur.fetchone()
     finally:
         conn.close()
-
 
 def _fetch_runs(limit=25, vcenter_id=None):
     vcid, _cfg = get_vcenter_cfg(vcenter_id)
@@ -3182,36 +3511,12 @@ def _fetch_runs(limit=25, vcenter_id=None):
     finally:
         conn.close()
 
-
-def _upsert_schedule(form, username: str):
-    sched_id = (form.get("id") or "").strip()
-    name = (form.get("name") or "").strip()
-
-    # IMPORTANTE: ahora el default en UI es "selected",
-    # pero mantenemos el fallback en backend por seguridad
-    scope = (form.get("scope") or "selected").strip()
-
-    enabled = 1 if (form.get("enabled") == "on") else 0
-
-    # NUEVO: permitir reglas solo ON / solo OFF
-    enable_on = (form.get("enable_on") == "on")
-    enable_off = (form.get("enable_off") == "on")
-
-    on_days = form.getlist("on_days") if enable_on else []
-    off_days = form.getlist("off_days") if enable_off else []
-    
 def _norm_hhmm(t: str) -> str:
-    """
-    Normaliza horas a formato HH:MM. 
-    Maneja variaciones de navegadores (HH:MM o HH:MM:SS).
-    """
     t = (t or "").strip()
     if not t:
         return ""
-    # Si viene como HH:MM:SS, recortamos a HH:MM
     if len(t) >= 5 and t[2] == ":":
         return t[:5]
-    
     try:
         parts = t.split(":")
         if len(parts) >= 2:
@@ -3222,17 +3527,12 @@ def _norm_hhmm(t: str) -> str:
         pass
     return t
 
-
 def _upsert_schedule(form, username: str):
-    """
-    Valida y guarda (Insert o Update) la regla en la base de datos.
-    """
     sched_id = (form.get("id") or "").strip()
     name = (form.get("name") or "").strip()
     scope = (form.get("scope") or "all").strip()
     enabled = 1 if (form.get("enabled") == "on") else 0
 
-    # Permitir reglas de solo Encendido, solo Apagado o ambos
     enable_on = (form.get("enable_on") == "on")
     enable_off = (form.get("enable_off") == "on")
 
@@ -3246,7 +3546,6 @@ def _upsert_schedule(form, username: str):
     labs = form.getlist("labs")
     labs_json = json.dumps(labs, ensure_ascii=False)
 
-    # Validaciones de Seguridad
     if scope not in ("all", "selected"):
         raise ValueError("Scope de laboratorio inválido.")
 
@@ -3267,14 +3566,12 @@ def _upsert_schedule(form, username: str):
     if scope == "selected" and not labs:
         raise ValueError("Has marcado 'Seleccionar labs', pero no has elegido ninguno de la lista.")
 
-    # Preparar datos para DB
     vcid, _cfg = get_vcenter_cfg()
     now = datetime.now().isoformat(timespec="seconds")
 
     conn = db_connect()
     try:
         if sched_id:
-            # ACTUALIZAR REGLA EXISTENTE
             conn.execute("""
                 UPDATE schedules SET
                     name=?, scope=?, labs_json=?,
@@ -3291,7 +3588,6 @@ def _upsert_schedule(form, username: str):
                 now, int(sched_id), vcid
             ))
         else:
-            # INSERTAR NUEVA REGLA
             conn.execute("""
                 INSERT INTO schedules
                 (vcenter_id, name, scope, labs_json, on_days, on_time, off_days, off_time,
@@ -3305,6 +3601,7 @@ def _upsert_schedule(form, username: str):
                 username, now, now
             ))
         conn.commit()
+        logger.info(f"Schedule {sched_id if sched_id else 'nuevo'} guardado por {username}")
     finally:
         conn.close()
 
@@ -3322,7 +3619,6 @@ def _toggle_schedule(sched_id: int, vcenter_id=None):
     finally:
         conn.close()
 
-
 def _delete_schedule(sched_id: int, vcenter_id=None):
     vcid, _cfg = get_vcenter_cfg(vcenter_id)
     conn = db_connect()
@@ -3330,9 +3626,9 @@ def _delete_schedule(sched_id: int, vcenter_id=None):
         conn.execute("DELETE FROM schedule_runs WHERE schedule_id=? AND vcenter_id=?", (sched_id, vcid))
         conn.execute("DELETE FROM schedules WHERE id=? AND vcenter_id=?", (sched_id, vcid))
         conn.commit()
+        logger.info(f"Schedule {sched_id} eliminado")
     finally:
         conn.close()
-
 
 def _log_run(schedule_id: int, action: str, labs: list, ok: bool, summary: str, details: dict, vcenter_id=None):
     vcid, _cfg = get_vcenter_cfg(vcenter_id)
@@ -3472,9 +3768,7 @@ def _lab_power_off_internal(content, lab_name: str, fallback_minutes: int):
 
     return {"ok": True, "requested": requested, "forced": forced}
 
-
 def process_due_schedules(now: datetime = None):
-    """Procesa reglas activas para TODOS los vCenters (pensado para ejecución por cron/daemon)."""
     if now is None:
         now = datetime.now()
 
@@ -3506,7 +3800,6 @@ def process_due_schedules(now: datetime = None):
         if day_code in off_days and hhmm == (s["off_time"] or ""):
             if (s["last_off_run"] or "") != minute_key:
                 _run_schedule_action(s, action="off", minute_key=minute_key, vcenter_id=vcid)
-
 
 def _run_schedule_action(sched_row, action: str, minute_key: str, vcenter_id=None):
     sched_id = int(sched_row["id"])
@@ -3619,9 +3912,8 @@ def schedule_page():
                 "off_time": r["off_time"],
                 "enabled": bool(int(r["enabled"])),
                 "fallback_minutes": int(r["fallback_minutes"] or 0),
-                "last_on_run": row["last_on_run"],
-                "last_off_run": row["last_off_run"],
-
+                "last_on_run": r["last_on_run"],
+                "last_off_run": r["last_off_run"],
             }
 
     return render_template("schedule.html",
@@ -3681,9 +3973,12 @@ def schedule_run_now(sched_id, action):
     flash(f"Ejecutado {action.upper()} manualmente. Revisa 'Ejecuciones recientes'.", "success")
     return redirect(url_for("schedule_page"))
 
+# ---------------- Inicialización ----------------
+
 init_user_db()
 init_schedule_db()
 init_teacher_templates_db()
+init_lab_deletions_db()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("FLASK_PORT", "5000")), debug=False)
