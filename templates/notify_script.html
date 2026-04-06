@@ -1,0 +1,25 @@
+<script>
+// Función global para enviar notificaciones desde JavaScript
+window.sendNotification = function(type, data) {
+    fetch('/api/notify', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            type: type,
+            data: data
+        })
+    }).catch(console.error);
+};
+
+// Ejemplo de uso en botones
+document.querySelectorAll('.btn-power').forEach(btn => {
+    btn.addEventListener('click', function() {
+        window.sendNotification('user_action', {
+            action: 'power_on',
+            vm: this.dataset.vmName
+        });
+    });
+});
+</script>
